@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Roboto', Arial, sans-serif;
+      font-size: 14px;
+      color: #333;
+      padding: 20px;
+      background: #fafafa;
+    }
+
+    h3 {
+      font-size: 18px;
+      font-weight: 500;
+      color: #1a237e;
+      margin-bottom: 20px;
+    }
+
+    /* Form group */
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: #666;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Select dropdown */
+    select {
+      width: 100%;
+      padding: 12px;
+      font-size: 14px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: white;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+    }
+
+    select:focus {
+      outline: none;
+      border-color: #1a237e;
+      box-shadow: 0 0 0 2px rgba(26, 35, 126, 0.1);
+    }
+
+    /* Client details card */
+    .client-details {
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      display: none;
+    }
+
+    .client-details.visible {
+      display: block;
+    }
+
+    .detail-row {
+      display: flex;
+      margin-bottom: 8px;
+    }
+
+    .detail-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .detail-label {
+      width: 100px;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .detail-value {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .status-badge.pending {
+      background: #fff3e0;
+      color: #e65100;
+    }
+
+    .status-badge.completed {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .status-badge.error {
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    /* Buttons */
+    .button-group {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    button.primary {
+      background: #1a237e;
+      color: white;
+    }
+
+    button.primary:hover {
+      background: #283593;
+    }
+
+    button.primary:disabled {
+      background: #9e9e9e;
+      cursor: not-allowed;
+    }
+
+    button.secondary {
+      background: transparent;
+      color: #666;
+      border: 1px solid #ddd;
+    }
+
+    button.secondary:hover {
+      background: #f5f5f5;
+    }
+
+    /* Loading state */
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #e0e0e0;
+      border-top-color: #1a237e;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+    }
+
+    .empty-icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+
+    /* Client count */
+    .client-count {
+      font-size: 12px;
+      color: #999;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div id="content">
+    <div class="loading">
+      <div class="spinner"></div>
+      Loading clients...
+    </div>
+  </div>
+
+  <script>
+    let clients = [];
+    let selectedClient = null;
+
+    document.addEventListener('DOMContentLoaded', function() {
+      loadClients();
+    });
+
+    function loadClients() {
+      google.script.run
+        .withSuccessHandler(renderSelector)
+        .withFailureHandler(showError)
+        .getClientSelectorData();
+    }
+
+    function renderSelector(data) {
+      const content = document.getElementById('content');
+      clients = data.clients || [];
+
+      if (clients.length === 0) {
+        content.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <div>No clients found</div>
+            <p style="margin-top: 8px; font-size: 12px;">
+              Submit data via the intake form to add clients.
+            </p>
+            <div class="button-group" style="justify-content: center; margin-top: 20px;">
+              <button class="secondary" onclick="closeDialog()">Close</button>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      // Build options
+      const options = clients.map(c =>
+        `<option value="${escapeAttr(c.id)}" ${c.id === data.activeClientId ? 'selected' : ''}>
+          ${escapeHtml(c.display)}
+        </option>`
+      ).join('');
+
+      content.innerHTML = `
+        <h3>Select Client</h3>
+
+        <div class="form-group">
+          <label for="clientSelect">Choose a client to analyze</label>
+          <select id="clientSelect" onchange="onClientChange(this.value)">
+            <option value="">-- Select a client --</option>
+            ${options}
+          </select>
+          <div class="client-count">${clients.length} client${clients.length !== 1 ? 's' : ''} available</div>
+        </div>
+
+        <div id="clientDetails" class="client-details">
+          <!-- Populated by onClientChange -->
+        </div>
+
+        <div class="button-group">
+          <button class="secondary" onclick="closeDialog()">Cancel</button>
+          <button id="selectBtn" class="primary" onclick="selectAndAnalyze()" disabled>
+            Select & Analyze
+          </button>
+        </div>
+      `;
+
+      // If there's an active client, show its details
+      if (data.activeClientId) {
+        onClientChange(data.activeClientId);
+      }
+    }
+
+    function onClientChange(clientId) {
+      const detailsDiv = document.getElementById('clientDetails');
+      const selectBtn = document.getElementById('selectBtn');
+
+      if (!clientId) {
+        detailsDiv.classList.remove('visible');
+        selectBtn.disabled = true;
+        selectedClient = null;
+        return;
+      }
+
+      selectedClient = clients.find(c => c.id === clientId);
+
+      if (!selectedClient) {
+        detailsDiv.classList.remove('visible');
+        selectBtn.disabled = true;
+        return;
+      }
+
+      // Status badge class
+      const statusClass = (selectedClient.status || 'pending').toLowerCase();
+
+      detailsDiv.innerHTML = `
+        <div class="detail-row">
+          <span class="detail-label">Company</span>
+          <span class="detail-value">${escapeHtml(selectedClient.name)}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Industry</span>
+          <span class="detail-value">${escapeHtml(selectedClient.industry || 'Not specified')}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Submitted</span>
+          <span class="detail-value">${escapeHtml(selectedClient.timestamp)}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Status</span>
+          <span class="detail-value">
+            <span class="status-badge ${statusClass}">${selectedClient.status || 'pending'}</span>
+          </span>
+        </div>
+      `;
+
+      detailsDiv.classList.add('visible');
+      selectBtn.disabled = false;
+    }
+
+    function selectAndAnalyze() {
+      if (!selectedClient) return;
+
+      const content = document.getElementById('content');
+      content.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          Running analysis for ${escapeHtml(selectedClient.name)}...
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            google.script.host.close();
+          } else {
+            showError({ message: result.error || 'Unknown error' });
+          }
+        })
+        .withFailureHandler(showError)
+        .selectClientAndAnalyze(selectedClient.id);
+    }
+
+    function closeDialog() {
+      google.script.host.close();
+    }
+
+    function showError(error) {
+      const content = document.getElementById('content');
+      content.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⚠</div>
+          <div>Error</div>
+          <p style="margin-top: 8px; font-size: 12px;">
+            ${escapeHtml(error.message || 'Unknown error occurred')}
+          </p>
+          <div class="button-group" style="justify-content: center; margin-top: 20px;">
+            <button class="secondary" onclick="loadClients()">Retry</button>
+            <button class="secondary" onclick="closeDialog()">Close</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function escapeAttr(text) {
+      if (!text) return '';
+      return text.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+  </script>
+</body>
+</html>

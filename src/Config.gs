@@ -1,0 +1,560 @@
+/**
+ * Config.gs
+ * Configuration loading and parsing
+ *
+ * ShopFloor Solutions - Operational KPI Calculator
+ */
+
+// ============================================================================
+// CONFIGURATION LOADING
+// ============================================================================
+
+/**
+ * Load all KPI definitions from Config_KPIs sheet
+ * @returns {Object[]} Array of KPI definition objects
+ */
+function loadKPIConfig() {
+  const sheet = getRequiredSheet(SHEET_NAMES.CONFIG_KPIS);
+  const data = sheetToObjects(sheet);
+
+  return data
+    .filter(row => row.active === true || row.active === 'TRUE')
+    .map(row => ({
+      id: String(row.kpi_id || '').trim(),
+      name: String(row.name || '').trim(),
+      description: String(row.description || '').trim(),
+      category: String(row.category || '').toLowerCase().trim(),
+      type: String(row.type || '').toLowerCase().trim(),
+      dataType: String(row.data_type || 'number').toLowerCase().trim(),
+      formula: row.formula ? String(row.formula).trim() : null,
+      sections: parseSections(row.sections),
+      pillar: parseInt(row.pillar, 10) || 1,
+      required: row.required === true || row.required === 'TRUE',
+      formOrder: parseInt(row.form_order, 10) || 999,
+      active: true
+    }))
+    .filter(kpi => kpi.id); // Filter out rows without ID
+}
+
+/**
+ * Load all validation rules from Config_Validations sheet
+ * @returns {Object[]} Array of validation rule objects
+ */
+function loadValidationConfig() {
+  const sheet = getRequiredSheet(SHEET_NAMES.CONFIG_VALIDATIONS);
+  const data = sheetToObjects(sheet);
+
+  return data
+    .filter(row => row.active === true || row.active === 'TRUE')
+    .map(row => ({
+      id: String(row.rule_id || '').trim(),
+      name: String(row.name || '').trim(),
+      description: String(row.description || '').trim(),
+      type: String(row.type || '').toLowerCase().trim(),
+      formula: String(row.formula || '').trim(),
+      tolerance: parseFloat(row.tolerance) || 0,
+      severity: String(row.severity || 'warning').toLowerCase().trim(),
+      message: String(row.message || '').trim(),
+      affectedKPIs: parseAffectedKPIs(row.affected_kpis),
+      active: true
+    }))
+    .filter(rule => rule.id && rule.formula); // Filter out incomplete rules
+}
+
+/**
+ * Load section/pillar definitions from Config_Sections sheet
+ * @returns {Object[]} Array of section definition objects
+ */
+function loadSectionConfig() {
+  const sheet = getRequiredSheet(SHEET_NAMES.CONFIG_SECTIONS);
+  const data = sheetToObjects(sheet);
+
+  return data.map(row => ({
+    sectionId: parseInt(row.section_id, 10),
+    sectionName: String(row.section_name || '').trim(),
+    sectionDescription: String(row.section_description || '').trim(),
+    pillarId: parseInt(row.pillar_id, 10) || 1,
+    pillarName: String(row.pillar_name || '').trim()
+  })).filter(section => section.sectionId);
+}
+
+/**
+ * Load industry benchmarks from Config_Benchmarks sheet
+ * @param {string} [industry] - Optional industry filter
+ * @returns {Object[]} Array of benchmark objects
+ */
+function loadBenchmarkConfig(industry) {
+  try {
+    const sheet = getRequiredSheet(SHEET_NAMES.CONFIG_BENCHMARKS);
+    const data = sheetToObjects(sheet);
+
+    let benchmarks = data.map(row => ({
+      kpiId: String(row.kpi_id || '').trim(),
+      industry: String(row.industry || 'all').toLowerCase().trim(),
+      poor: parseFloat(row.poor),
+      average: parseFloat(row.average),
+      good: parseFloat(row.good),
+      excellent: parseFloat(row.excellent)
+    })).filter(b => b.kpiId);
+
+    // Filter by industry if specified
+    if (industry) {
+      const industryLower = industry.toLowerCase();
+      benchmarks = benchmarks.filter(b =>
+        b.industry === 'all' || b.industry === industryLower
+      );
+    }
+
+    return benchmarks;
+  } catch (e) {
+    // Benchmarks sheet is optional for phase 1
+    log('Benchmarks sheet not found or empty - using defaults');
+    return getDefaultBenchmarks();
+  }
+}
+
+/**
+ * Get default benchmarks (hardcoded for phase 1)
+ * @returns {Object[]}
+ */
+function getDefaultBenchmarks() {
+  return [
+    { kpiId: 'booking_rate', industry: 'all', poor: 30, average: 50, good: 70, excellent: 85 },
+    { kpiId: 'close_rate', industry: 'all', poor: 20, average: 35, good: 50, excellent: 65 },
+    { kpiId: 'profit_margin', industry: 'all', poor: 5, average: 12, good: 20, excellent: 30 },
+    { kpiId: 'schedule_efficiency', industry: 'all', poor: 60, average: 80, good: 95, excellent: 100 }
+  ];
+}
+
+// ============================================================================
+// FILTERED CONFIGURATION GETTERS
+// ============================================================================
+
+/**
+ * Get only input KPIs (for form generation)
+ * @returns {Object[]} Array of input-type KPI definitions sorted by form_order
+ */
+function getInputKPIs() {
+  const kpis = loadKPIConfig();
+  return kpis
+    .filter(kpi => kpi.type === 'input')
+    .sort((a, b) => a.formOrder - b.formOrder);
+}
+
+/**
+ * Get only calculated KPIs (for calculation engine)
+ * @returns {Object[]} Array of calculated-type KPI definitions
+ */
+function getCalculatedKPIs() {
+  const kpis = loadKPIConfig();
+  return kpis.filter(kpi => kpi.type === 'calculated');
+}
+
+/**
+ * Get KPIs by category
+ * @param {string} category - 'volume' or 'efficiency'
+ * @returns {Object[]} Array of KPI definitions
+ */
+function getKPIsByCategory(category) {
+  const kpis = loadKPIConfig();
+  return kpis.filter(kpi => kpi.category === category.toLowerCase());
+}
+
+/**
+ * Get KPI definition by ID
+ * @param {string} kpiId - KPI ID
+ * @returns {Object|null} KPI definition or null
+ */
+function getKPIById(kpiId) {
+  const kpis = loadKPIConfig();
+  return kpis.find(kpi => kpi.id === kpiId) || null;
+}
+
+/**
+ * Get section definition by ID
+ * @param {number} sectionId - Section ID
+ * @returns {Object|null} Section definition or null
+ */
+function getSectionById(sectionId) {
+  const sections = loadSectionConfig();
+  return sections.find(s => s.sectionId === sectionId) || null;
+}
+
+/**
+ * Get section names for a list of section IDs
+ * @param {number[]} sectionIds - Array of section IDs
+ * @returns {string} Comma-separated section names
+ */
+function getSectionNames(sectionIds) {
+  const sections = loadSectionConfig();
+  const names = sectionIds
+    .map(id => {
+      const section = sections.find(s => s.sectionId === id);
+      return section ? section.sectionName : null;
+    })
+    .filter(name => name !== null);
+
+  return names.join(', ');
+}
+
+/**
+ * Get benchmark for a KPI
+ * @param {string} kpiId - KPI ID
+ * @param {string} [industry] - Industry filter
+ * @returns {Object|null} Benchmark object or null
+ */
+function getBenchmarkForKPI(kpiId, industry) {
+  const benchmarks = loadBenchmarkConfig(industry);
+
+  // First try to find industry-specific benchmark
+  if (industry) {
+    const industryBenchmark = benchmarks.find(b =>
+      b.kpiId === kpiId && b.industry === industry.toLowerCase()
+    );
+    if (industryBenchmark) return industryBenchmark;
+  }
+
+  // Fall back to 'all' industry benchmark
+  return benchmarks.find(b => b.kpiId === kpiId && b.industry === 'all') || null;
+}
+
+// ============================================================================
+// CONFIGURATION VALIDATION
+// ============================================================================
+
+/**
+ * Validate configuration integrity
+ * Check for: duplicate IDs, invalid references, formula syntax
+ * @returns {Object} {valid: boolean, errors: string[], warnings: string[]}
+ */
+function validateConfig() {
+  const errors = [];
+  const warnings = [];
+
+  try {
+    // Load configurations
+    const kpis = loadKPIConfig();
+    const validations = loadValidationConfig();
+    const sections = loadSectionConfig();
+
+    // Check for duplicate KPI IDs
+    const kpiIds = kpis.map(k => k.id);
+    const duplicateKPIs = kpiIds.filter((id, i) => kpiIds.indexOf(id) !== i);
+    if (duplicateKPIs.length > 0) {
+      errors.push(`Duplicate KPI IDs found: ${duplicateKPIs.join(', ')}`);
+    }
+
+    // Check for duplicate validation rule IDs
+    const ruleIds = validations.map(v => v.id);
+    const duplicateRules = ruleIds.filter((id, i) => ruleIds.indexOf(id) !== i);
+    if (duplicateRules.length > 0) {
+      errors.push(`Duplicate validation rule IDs found: ${duplicateRules.join(', ')}`);
+    }
+
+    // Validate KPI formulas reference existing KPIs
+    const calculatedKPIs = kpis.filter(k => k.type === 'calculated');
+    for (const kpi of calculatedKPIs) {
+      if (kpi.formula && !kpi.formula.startsWith('CUSTOM:')) {
+        const deps = extractDependencies(kpi.formula);
+        for (const dep of deps) {
+          if (!kpiIds.includes(dep)) {
+            errors.push(`KPI "${kpi.id}" references unknown KPI "${dep}" in formula`);
+          }
+        }
+      }
+    }
+
+    // Validate section references
+    const sectionIds = sections.map(s => s.sectionId);
+    for (const kpi of kpis) {
+      for (const sectionId of kpi.sections) {
+        if (!sectionIds.includes(sectionId)) {
+          warnings.push(`KPI "${kpi.id}" references unknown section ${sectionId}`);
+        }
+      }
+    }
+
+    // Validate validation rules reference existing KPIs
+    for (const rule of validations) {
+      for (const kpiId of rule.affectedKPIs) {
+        if (!kpiIds.includes(kpiId)) {
+          warnings.push(`Validation "${rule.id}" references unknown KPI "${kpiId}"`);
+        }
+      }
+    }
+
+    // Check for required input KPIs
+    const inputKPIs = kpis.filter(k => k.type === 'input');
+    if (inputKPIs.length === 0) {
+      errors.push('No input KPIs defined - form will be empty');
+    }
+
+    // Check sections exist
+    if (sections.length === 0) {
+      warnings.push('No sections defined - section mapping will not work');
+    }
+
+  } catch (e) {
+    errors.push(`Configuration loading failed: ${e.message}`);
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors: errors,
+    warnings: warnings
+  };
+}
+
+/**
+ * Extract KPI IDs referenced in a formula
+ * @param {string} formula - Formula string
+ * @returns {string[]} Array of KPI IDs
+ */
+function extractDependencies(formula) {
+  if (!formula) return [];
+
+  // Pattern: OPERATION:kpi_id:kpi_id or OPERATION:kpi_id
+  // Also handle special cases like RANGE:kpi_id:number:number
+  const parts = formula.split(':');
+  const dependencies = [];
+
+  if (parts.length < 2) return [];
+
+  const operation = parts[0].toUpperCase();
+
+  // Skip the operation, extract potential KPI references
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i].trim();
+
+    // Skip if it looks like a number
+    if (/^-?\d+\.?\d*$/.test(part)) continue;
+
+    // Skip if it's a special keyword
+    if (['period', 'days', 'true', 'false'].includes(part.toLowerCase())) continue;
+
+    // This might be a KPI reference
+    dependencies.push(part);
+  }
+
+  return dependencies;
+}
+
+// ============================================================================
+// CONFIGURATION INITIALIZATION
+// ============================================================================
+
+/**
+ * Create default Config_KPIs sheet with sample data
+ */
+function initializeKPIConfig() {
+  const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG_KPIS);
+
+  const headers = [
+    'kpi_id', 'name', 'description', 'category', 'type', 'data_type',
+    'formula', 'sections', 'pillar', 'required', 'form_order', 'active'
+  ];
+
+  const sampleData = [
+    // Volume Input KPIs
+    ['total_leads', 'Total Leads', 'Number of leads generated in the period', 'volume', 'input', 'integer', '', '1', 1, true, 1, true],
+    ['in_home_visits', 'In-Home Visits', 'Number of in-home sales appointments', 'volume', 'input', 'integer', '', '2,3', 1, true, 2, true],
+    ['jobs_closed', 'Jobs Closed', 'Number of jobs sold/closed', 'volume', 'input', 'integer', '', '3', 1, true, 3, true],
+    ['gross_revenue', 'Gross Revenue', 'Total revenue for the period', 'volume', 'input', 'currency', '', '7', 1, true, 4, true],
+    ['total_costs', 'Total Costs', 'Total operating costs for the period', 'volume', 'input', 'currency', '', '7', 1, true, 5, true],
+    ['num_employees', 'Number of Employees', 'Total employees', 'volume', 'input', 'integer', '', '8', 3, false, 6, true],
+    ['num_techs', 'Number of Technicians', 'Field technicians/installers', 'volume', 'input', 'integer', '', '4,8', 3, false, 7, true],
+    ['num_vehicles', 'Number of Vehicles', 'Service vehicles/trucks', 'volume', 'input', 'integer', '', '5,6', 3, false, 8, true],
+    ['hours_scheduled', 'Hours Scheduled', 'Total man-hours scheduled to jobs', 'volume', 'input', 'number', '', '5', 2, false, 9, true],
+    ['hours_per_day', 'Work Hours Per Day', 'Standard work hours per day for your techs', 'volume', 'input', 'number', '', '5', 2, false, 10, true],
+
+    // Efficiency Input KPIs
+    ['average_ticket', 'Average Ticket', 'Average revenue per job (as reported)', 'efficiency', 'input', 'currency', '', '3', 1, false, 11, true],
+    ['reported_close_rate', 'Reported Close Rate', 'Close rate as reported by client (%)', 'efficiency', 'input', 'percentage', '', '3', 1, false, 12, true],
+    ['reported_booking_rate', 'Reported Booking Rate', 'Booking rate as reported by client (%)', 'efficiency', 'input', 'percentage', '', '2', 1, false, 13, true],
+
+    // Calculated KPIs
+    ['booking_rate', 'Booking Rate', 'Calculated: In-home visits ÷ Total leads × 100', 'efficiency', 'calculated', 'percentage', 'PERCENTAGE:in_home_visits:total_leads', '1,2', 1, false, '', true],
+    ['close_rate', 'Close Rate', 'Calculated: Jobs closed ÷ In-home visits × 100', 'efficiency', 'calculated', 'percentage', 'PERCENTAGE:jobs_closed:in_home_visits', '3', 1, false, '', true],
+    ['net_profit', 'Net Profit', 'Calculated: Gross revenue - Total costs', 'efficiency', 'calculated', 'currency', 'SUBTRACT:gross_revenue:total_costs', '7', 1, false, '', true],
+    ['profit_margin', 'Profit Margin', 'Calculated: Net profit ÷ Gross revenue × 100', 'efficiency', 'calculated', 'percentage', 'PERCENTAGE:net_profit:gross_revenue', '7', 1, false, '', true],
+    ['schedule_capacity', 'Schedule Capacity', 'Calculated: Techs × hours per day × days in period', 'volume', 'calculated', 'number', 'CUSTOM:calculateScheduleCapacity', '5', 3, false, '', true],
+    ['schedule_efficiency', 'Schedule Efficiency', 'Calculated: Hours scheduled ÷ Capacity × 100', 'efficiency', 'calculated', 'percentage', 'PERCENTAGE:hours_scheduled:schedule_capacity', '5', 2, false, '', true],
+    ['revenue_per_vehicle', 'Revenue Per Vehicle', 'Calculated: Gross revenue ÷ Number of vehicles', 'efficiency', 'calculated', 'currency', 'DIVIDE:gross_revenue:num_vehicles', '5', 2, false, '', true],
+    ['calculated_avg_ticket', 'Calculated Avg Ticket', 'Calculated: Gross revenue ÷ Jobs closed', 'efficiency', 'calculated', 'currency', 'DIVIDE:gross_revenue:jobs_closed', '3', 1, false, '', true],
+    ['daily_revenue', 'Daily Revenue', 'Calculated: Gross revenue ÷ days in period', 'efficiency', 'calculated', 'currency', 'PER_DAY:gross_revenue', '7', 1, false, '', true],
+    ['revenue_per_tech', 'Revenue Per Tech', 'Calculated: Gross revenue ÷ Number of technicians', 'efficiency', 'calculated', 'currency', 'DIVIDE:gross_revenue:num_techs', '4', 2, false, '', true]
+  ];
+
+  // Write headers and data
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Format header row
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4285f4')
+    .setFontColor('#ffffff');
+
+  // Auto-resize columns
+  for (let i = 1; i <= headers.length; i++) {
+    sheet.autoResizeColumn(i);
+  }
+
+  // Freeze header row
+  sheet.setFrozenRows(1);
+
+  log('Initialized Config_KPIs sheet with sample data');
+}
+
+/**
+ * Create default Config_Validations sheet with sample data
+ */
+function initializeValidationConfig() {
+  const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG_VALIDATIONS);
+
+  const headers = [
+    'rule_id', 'name', 'description', 'type', 'formula',
+    'tolerance', 'severity', 'message', 'affected_kpis', 'active'
+  ];
+
+  const sampleData = [
+    ['booking_rate_reconcile', 'Booking Rate Reconciliation', 'Check if booking rate matches leads vs visits', 'reconciliation', 'RECONCILE:total_leads*booking_rate/100:in_home_visits', 0.10, 'error', 'Your reported booking rate doesn\'t match your leads and visits. Expected {expected}, got {actual}.', 'total_leads,booking_rate,in_home_visits', true],
+    ['close_rate_reconcile', 'Close Rate Reconciliation', 'Check if close rate matches visits vs jobs', 'reconciliation', 'RECONCILE:in_home_visits*close_rate/100:jobs_closed', 0.10, 'error', 'Your close rate doesn\'t reconcile with your visits and jobs closed.', 'in_home_visits,close_rate,jobs_closed', true],
+    ['revenue_reconcile', 'Revenue Reconciliation', 'Check if revenue matches jobs × ticket', 'reconciliation', 'RECONCILE:jobs_closed*average_ticket:gross_revenue', 0.15, 'warning', 'Your revenue doesn\'t match jobs × average ticket. You may have missing job data.', 'jobs_closed,average_ticket,gross_revenue', true],
+    ['profit_positive', 'Profit Should Be Positive', 'Revenue should exceed costs', 'range', 'GREATER:gross_revenue:total_costs', 0, 'warning', 'Your costs exceed your revenue. You\'re operating at a loss.', 'gross_revenue,total_costs', true],
+    ['close_rate_range', 'Close Rate Realistic', 'Close rate should be between 0-100%', 'range', 'RANGE:close_rate:0:100', 0, 'error', 'Close rate must be between 0% and 100%.', 'close_rate', true],
+    ['booking_rate_range', 'Booking Rate Realistic', 'Booking rate should be between 0-100%', 'range', 'RANGE:booking_rate:0:100', 0, 'error', 'Booking rate must be between 0% and 100%.', 'booking_rate', true],
+    ['schedule_efficiency_range', 'Schedule Efficiency Range', 'Schedule efficiency typically 0-150%', 'range', 'RANGE:schedule_efficiency:0:150', 0, 'warning', 'Schedule efficiency over 100% means overtime. Over 150% is unusual.', 'schedule_efficiency', true],
+    ['avg_ticket_match', 'Average Ticket Match', 'Reported vs calculated average ticket', 'reconciliation', 'EQUALS:average_ticket:calculated_avg_ticket', 0.15, 'info', 'Your reported average ticket differs from calculated. Using calculated value.', 'average_ticket,calculated_avg_ticket', true],
+    ['has_leads_for_visits', 'Leads Required for Visits', 'Can\'t have visits without leads', 'dependency', 'REQUIRES:in_home_visits:total_leads', 0, 'error', 'You reported in-home visits but no leads. Where did these visits come from?', 'in_home_visits,total_leads', true],
+    ['has_visits_for_jobs', 'Visits Required for Jobs', 'Can\'t close jobs without visits (usually)', 'dependency', 'REQUIRES:jobs_closed:in_home_visits', 0, 'warning', 'You reported closed jobs but no in-home visits. Is this phone sales only?', 'jobs_closed,in_home_visits', true]
+  ];
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Format header row
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4285f4')
+    .setFontColor('#ffffff');
+
+  // Auto-resize columns
+  for (let i = 1; i <= headers.length; i++) {
+    sheet.autoResizeColumn(i);
+  }
+
+  sheet.setFrozenRows(1);
+
+  log('Initialized Config_Validations sheet with sample data');
+}
+
+/**
+ * Create default Config_Sections sheet with sample data
+ */
+function initializeSectionConfig() {
+  const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG_SECTIONS);
+
+  const headers = ['section_id', 'section_name', 'section_description', 'pillar_id', 'pillar_name'];
+
+  const sampleData = [
+    [1, 'Marketing', 'Lead generation, advertising, brand awareness', 1, 'Operational Visibility'],
+    [2, 'CSR/Call Center', 'Call handling, booking, customer intake', 1, 'Operational Visibility'],
+    [3, 'Sales', 'In-home visits, proposals, closing', 1, 'Operational Visibility'],
+    [4, 'Field Operations', 'Technicians, installs, service delivery', 2, 'Operational Standardization'],
+    [5, 'Scheduling/Dispatch', 'Job assignment, routing, capacity management', 2, 'Operational Standardization'],
+    [6, 'Inventory/Warehouse', 'Parts, materials, truck stock', 2, 'Operational Standardization'],
+    [7, 'Finance/Accounting', 'Cash flow, invoicing, collections, reporting', 1, 'Operational Visibility'],
+    [8, 'HR/Training', 'Hiring, onboarding, skill development', 3, 'Capacity & Growth Readiness'],
+    [9, 'Management', 'Oversight, strategy, decision-making', 3, 'Capacity & Growth Readiness']
+  ];
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Format header row
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4285f4')
+    .setFontColor('#ffffff');
+
+  for (let i = 1; i <= headers.length; i++) {
+    sheet.autoResizeColumn(i);
+  }
+
+  sheet.setFrozenRows(1);
+
+  log('Initialized Config_Sections sheet with sample data');
+}
+
+/**
+ * Create default Config_Benchmarks sheet (for future industry-specific benchmarks)
+ */
+function initializeBenchmarkConfig() {
+  const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG_BENCHMARKS);
+
+  const headers = ['kpi_id', 'industry', 'poor', 'average', 'good', 'excellent', 'notes'];
+
+  const sampleData = [
+    // Default benchmarks (applies to all industries)
+    ['booking_rate', 'all', 30, 50, 70, 85, 'Percentage of leads that become appointments'],
+    ['close_rate', 'all', 20, 35, 50, 65, 'Percentage of appointments that become sales'],
+    ['profit_margin', 'all', 5, 12, 20, 30, 'Net profit as percentage of revenue'],
+    ['schedule_efficiency', 'all', 60, 80, 95, 100, 'Utilization of available capacity'],
+
+    // Example industry-specific benchmarks (can be expanded)
+    ['booking_rate', 'hvac', 35, 55, 75, 90, 'HVAC typically has higher booking rates'],
+    ['close_rate', 'roofing', 25, 40, 55, 70, 'Roofing often has higher close rates due to urgency'],
+    ['profit_margin', 'plumbing', 8, 15, 22, 32, 'Plumbing service calls tend to have higher margins']
+  ];
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Format header row
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4285f4')
+    .setFontColor('#ffffff');
+
+  for (let i = 1; i <= headers.length; i++) {
+    sheet.autoResizeColumn(i);
+  }
+
+  sheet.setFrozenRows(1);
+
+  // Add note about future expansion
+  sheet.getRange(sampleData.length + 3, 1).setValue(
+    'Note: Add industry-specific benchmarks by creating rows with the industry name. ' +
+    'Use "all" for benchmarks that apply to all industries.'
+  );
+
+  log('Initialized Config_Benchmarks sheet with sample data');
+}
+
+/**
+ * Initialize _Settings sheet with defaults
+ */
+function initializeSettings() {
+  const sheet = getOrCreateSheet(SHEET_NAMES.SETTINGS);
+  sheet.clearContents();
+
+  const settings = [
+    [SETTINGS_KEYS.ACTIVE_CLIENT_ID, ''],
+    [SETTINGS_KEYS.FORM_ID, ''],
+    [SETTINGS_KEYS.FORM_URL, ''],
+    [SETTINGS_KEYS.FORM_RESPONSE_URL, ''],
+    [SETTINGS_KEYS.LAST_FORM_SYNC, ''],
+    [SETTINGS_KEYS.AUTO_ANALYZE, true],
+    [SETTINGS_KEYS.VERSION, '1.0'],
+    [SETTINGS_KEYS.NOTIFICATION_EMAIL, 'info@shopfloorsolutions.ca']
+  ];
+
+  sheet.getRange(1, 1, settings.length, 2).setValues(settings);
+
+  log('Initialized _Settings sheet with defaults');
+}
