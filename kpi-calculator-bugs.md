@@ -1,8 +1,8 @@
 # KPI Calculator System — Enhancement & Bug Fix Specifications
 
-**Document Version**: 2.0  
-**Date**: November 26, 2025  
-**Author**: ShopFloor Solutions (System Audit)  
+**Document Version**: 2.0
+**Date**: November 26, 2025
+**Author**: ShopFloor Solutions (System Audit)
 **For**: Lead Developer
 
 ---
@@ -13,11 +13,8 @@
 2. [High Priority Issues](#high-priority-issues)
 3. [Medium Priority Issues](#medium-priority-issues)
 4. [Low Priority Issues](#low-priority-issues)
-5. [Enhancement #1: State/Province Benchmarking Support](#enhancement-1-stateprovince-benchmarking-support)
-6. [Enhancement #2: Config Management UI Dialogs](#enhancement-2-config-management-ui-dialogs)
-7. [Enhancement #3: Form Response Integration Fix](#enhancement-3-form-response-integration-fix)
-8. [Implementation Priority Matrix](#implementation-priority-matrix)
-9. [Testing Checklist](#testing-checklist)
+5. [Implementation Priority Matrix](#implementation-priority-matrix)
+6. [Testing Checklist](#testing-checklist)
 
 ---
 
@@ -25,8 +22,8 @@
 
 ### Bug #1: UI.gs — Recursive Function Name Shadowing (BREAKS FUNCTIONALITY)
 
-**File**: `UI.gs`  
-**Function**: `handleClientSelection()`  
+**File**: `UI.gs`
+**Function**: `handleClientSelection()`
 **Severity**: 🔴 **CRITICAL** — Function will fail silently
 
 **Problem**:
@@ -74,8 +71,8 @@ function handleClientSelection(clientId, shouldRunAnalysis) {  // Renamed parame
 
 ### Bug #2: ValidationEngine.gs — Incorrect REQUIRES Logic
 
-**File**: `ValidationEngine.gs`  
-**Function**: `executeRequires()`  
+**File**: `ValidationEngine.gs`
+**Function**: `executeRequires()`
 **Severity**: 🔴 **CRITICAL** — Produces false validation errors
 
 **Problem**:
@@ -136,7 +133,7 @@ function executeRequires(formula, values) {
 
 ### Bug #3: Validation Formulas Reference Wrong KPIs
 
-**File**: `Config_Validations` sheet  
+**File**: `Config_Validations` sheet
 **Severity**: 🔴 **CRITICAL** — Reconciliation checks will always pass or fail incorrectly
 
 **Problem**:
@@ -166,7 +163,7 @@ Also update `affected_kpis` column:
 
 ### Issue #1: Duplicate Function Definition — `getSectionNames()`
 
-**Files**: `Config.gs` (line ~108) and `ResultsGenerator.gs` (line ~282)  
+**Files**: `Config.gs` (line ~108) and `ResultsGenerator.gs` (line ~282)
 **Severity**: 🟠 **HIGH** — Will cause unpredictable behavior
 
 **Problem**:
@@ -178,7 +175,7 @@ function getSectionNames(sectionIds) {  // Takes array of section IDs
   // Returns comma-separated names
 }
 
-// ResultsGenerator.gs version  
+// ResultsGenerator.gs version
 function getSectionNamesForKPI(kpi, sectionConfig) {  // Takes KPI object and config
   // Returns comma-separated names
 }
@@ -203,7 +200,7 @@ function getSectionNamesForKPI(kpi, sectionConfig) { ... }
 
 ### Issue #2: Missing Setting — `form_responses_sheet`
 
-**File**: `Utils.gs` — `initializeSettings()` and `Triggers.gs` — `diagnoseFormIntegration()`  
+**File**: `Utils.gs` — `initializeSettings()` and `Triggers.gs` — `diagnoseFormIntegration()`
 **Severity**: 🟠 **HIGH** — Diagnostic function will fail
 
 **Problem**:
@@ -241,7 +238,7 @@ const settings = [
 
 ### Issue #3: `processNewSubmission()` Event Handling Mismatch
 
-**File**: `ClientManager.gs`  
+**File**: `ClientManager.gs`
 **Severity**: 🟠 **HIGH** — Form submissions not processed correctly
 
 **Problem**:
@@ -268,7 +265,7 @@ Form responses go to "Form Responses 1" sheet, NOT the Clients sheet. The code n
 
 ### Issue #4: Silent Failures When Optional KPIs Missing
 
-**File**: `KPIEngine.gs`  
+**File**: `KPIEngine.gs`
 **Severity**: 🟠 **HIGH** — Cascading calculation failures with no feedback
 
 **Problem**:
@@ -330,7 +327,7 @@ function calculateAllKPIs(clientData, kpiConfig) {
 
 ### Issue #5: `sheetToObjects()` Duplicate Header Handling
 
-**File**: `Utils.gs`  
+**File**: `Utils.gs`
 **Severity**: 🟡 **MEDIUM** — Data corruption if headers duplicated
 
 **Problem**:
@@ -350,7 +347,7 @@ function sheetToObjects(sheet) {
   if (data.length < 2) return [];
 
   const headers = data[0].map(h => String(h).trim().toLowerCase());
-  
+
   // NEW: Check for duplicates
   const headerCount = {};
   const uniqueHeaders = headers.map((h, idx) => {
@@ -382,7 +379,7 @@ function sheetToObjects(sheet) {
 
 ### Issue #6: Benchmark Lookup Missing State Parameter
 
-**File**: `InsightsEngine.gs`  
+**File**: `InsightsEngine.gs`
 **Severity**: 🟡 **MEDIUM** — Regional benchmarks not utilized
 
 **Problem**:
@@ -410,7 +407,7 @@ const benchmarks = loadBenchmarksForInsights(clientData.industry, clientData.sta
 
 ### Issue #7: Config_Sections Sheet Has 1000 Empty Rows
 
-**File**: Config_Sections sheet (exported Excel)  
+**File**: Config_Sections sheet (exported Excel)
 **Severity**: 🟡 **MEDIUM** — Performance impact, confusing export
 
 **Problem**:
@@ -424,7 +421,7 @@ In `initializeSectionConfig()`, after writing data, clear any rows beyond the da
 function initializeSectionConfig() {
   const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG_SECTIONS);
   // ... write data ...
-  
+
   // Clear any rows beyond our data
   const dataRowCount = sampleData.length + 1; // +1 for header
   const lastRow = sheet.getMaxRows();
@@ -438,7 +435,7 @@ function initializeSectionConfig() {
 
 ### Issue #8: InsightsEngine Default Benchmarks Mismatch
 
-**File**: `InsightsEngine.gs`  
+**File**: `InsightsEngine.gs`
 **Severity**: 🟡 **MEDIUM** — Inconsistent benchmark sources
 
 **Problem**:
@@ -468,7 +465,7 @@ function getDefaultBenchmarksForInsights() {
   return getDefaultBenchmarks().reduce((acc, b) => {
     acc[b.kpiId] = {
       poor: b.poor,
-      average: b.average, 
+      average: b.average,
       good: b.good,
       excellent: b.excellent
     };
@@ -483,7 +480,7 @@ function getDefaultBenchmarksForInsights() {
 
 ### Issue #9: Hardcoded Email in Multiple Places
 
-**Files**: `Triggers.gs`, `README.md`  
+**Files**: `Triggers.gs`, `README.md`
 **Severity**: 🟢 **LOW** — Maintenance burden
 
 **Problem**:
@@ -499,7 +496,7 @@ If email changes, must update multiple places.
 
 ### Issue #10: No Input Validation on KPI Values
 
-**File**: `FormManager.gs`  
+**File**: `FormManager.gs`
 **Severity**: 🟢 **LOW** — Poor data quality possible
 
 **Problem**:
@@ -526,7 +523,7 @@ function createFormQuestion(form, kpi) {
         .requireNumberGreaterThanOrEqualTo(0)  // Prevent negatives
         .build());
       break;
-      
+
     case DATA_TYPES.PERCENTAGE:
       item.setValidation(FormApp.createTextValidation()
         .setHelpText('Please enter a percentage between 0 and 100')
@@ -542,7 +539,7 @@ function createFormQuestion(form, kpi) {
 
 ### Issue #11: ResultsGenerator Color Constants Not Configurable
 
-**File**: `ResultsGenerator.gs`  
+**File**: `ResultsGenerator.gs`
 **Severity**: 🟢 **LOW** — Hardcoded branding
 
 **Problem**:
@@ -563,7 +560,7 @@ If ShopFloor Solutions wants to change branding colors, must modify code.
 
 ### Issue #12: Missing JSDoc in Several Functions
 
-**Files**: Various  
+**Files**: Various
 **Severity**: 🟢 **LOW** — Maintainability
 
 **Problem**:
