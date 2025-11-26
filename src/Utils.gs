@@ -25,6 +25,7 @@ const SETTINGS_KEYS = {
   FORM_ID: 'form_id',
   FORM_URL: 'form_url',
   FORM_RESPONSE_URL: 'form_response_url',
+  FORM_RESPONSES_SHEET: 'form_responses_sheet',
   LAST_FORM_SYNC: 'last_form_sync',
   AUTO_ANALYZE: 'auto_analyze',
   VERSION: 'version',
@@ -148,7 +149,26 @@ function sheetToObjects(sheet) {
     return []; // No data rows
   }
 
-  const headers = data[0].map(h => String(h).trim().toLowerCase());
+  // Process headers: handle duplicates by appending _2, _3, etc.
+  const rawHeaders = data[0].map(h => String(h).trim().toLowerCase());
+  const headers = [];
+  const headerCounts = {};
+
+  for (const header of rawHeaders) {
+    if (!header) {
+      headers.push('');
+      continue;
+    }
+
+    if (headerCounts[header] === undefined) {
+      headerCounts[header] = 1;
+      headers.push(header);
+    } else {
+      headerCounts[header]++;
+      headers.push(`${header}_${headerCounts[header]}`);
+    }
+  }
+
   const objects = [];
 
   for (let i = 1; i < data.length; i++) {
@@ -156,7 +176,9 @@ function sheetToObjects(sheet) {
     const obj = {};
 
     for (let j = 0; j < headers.length; j++) {
-      obj[headers[j]] = row[j];
+      if (headers[j]) {
+        obj[headers[j]] = row[j];
+      }
     }
 
     objects.push(obj);

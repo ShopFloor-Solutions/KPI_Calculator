@@ -461,7 +461,8 @@ function installFormTrigger(formId) {
 }
 
 /**
- * Rename the form responses sheet to 'Clients'
+ * Handle the form responses sheet after form creation
+ * Now keeps form responses separate and stores the sheet name
  */
 function renameFormResponsesSheet() {
   try {
@@ -471,32 +472,73 @@ function renameFormResponsesSheet() {
     for (const sheet of sheets) {
       const name = sheet.getName();
       if (name.startsWith('Form Responses')) {
-        // Check if Clients sheet exists
-        const clientsSheet = ss.getSheetByName(SHEET_NAMES.CLIENTS);
+        // Store the form responses sheet name in settings
+        setSetting(SETTINGS_KEYS.FORM_RESPONSES_SHEET, name);
+        log('Form responses sheet stored: ' + name);
 
-        if (clientsSheet) {
-          // Copy headers from Clients to form responses (to ensure column mapping)
-          const clientHeaders = clientsSheet.getRange(1, 1, 1, clientsSheet.getLastColumn()).getValues()[0];
-          const formHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-
-          // Delete the form responses sheet, keep Clients
-          ss.deleteSheet(sheet);
-          log('Deleted Form Responses sheet - using existing Clients sheet');
-        } else {
-          // Rename form responses to Clients
-          sheet.setName(SHEET_NAMES.CLIENTS);
-          log('Renamed Form Responses to Clients');
-
-          // Add missing columns
-          addMissingClientColumns(sheet);
-        }
+        // Ensure Clients sheet exists with proper headers
+        ensureClientsSheet();
 
         break;
       }
     }
   } catch (error) {
-    logError('Error renaming form responses sheet', error);
+    logError('Error handling form responses sheet', error);
   }
+}
+
+/**
+ * Ensure Clients sheet exists with proper headers
+ */
+function ensureClientsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let clientsSheet = ss.getSheetByName(SHEET_NAMES.CLIENTS);
+
+  if (!clientsSheet) {
+    clientsSheet = ss.insertSheet(SHEET_NAMES.CLIENTS);
+    log('Created Clients sheet');
+  }
+
+  // Check if headers exist
+  const lastCol = clientsSheet.getLastColumn();
+  if (lastCol < 1) {
+    // Add headers - combine standard fields + KPI fields
+    const kpiConfig = loadKPIConfig();
+    const inputKPIs = kpiConfig.filter(k => k.type === 'input');
+
+    const headers = [
+      'timestamp',
+      'client_id',
+      'company_name',
+      'contact_email',
+      'industry',
+      'state',
+      'data_period',
+      'period_days'
+    ];
+
+    // Add input KPI columns
+    for (const kpi of inputKPIs) {
+      headers.push(kpi.id);
+    }
+
+    // Add status columns
+    headers.push('notes', 'analysis_status', 'last_analyzed');
+
+    clientsSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+    // Format header row
+    clientsSheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#4285f4')
+      .setFontColor('#ffffff');
+
+    clientsSheet.setFrozenRows(1);
+
+    log('Initialized Clients sheet headers');
+  }
+
+  return clientsSheet;
 }
 
 /**
