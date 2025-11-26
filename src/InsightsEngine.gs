@@ -6,15 +6,11 @@
  */
 
 // ============================================================================
-// BENCHMARK THRESHOLDS (Default values - can be overridden by Config_Benchmarks)
+// BENCHMARK THRESHOLDS
 // ============================================================================
-
-const DEFAULT_BENCHMARKS = {
-  booking_rate: { poor: 30, average: 50, good: 70, excellent: 85 },
-  close_rate: { poor: 20, average: 35, good: 50, excellent: 65 },
-  profit_margin: { poor: 5, average: 12, good: 20, excellent: 30 },
-  schedule_efficiency: { poor: 60, average: 80, good: 95, excellent: 100 }
-};
+// Note: Benchmarks are loaded from Config_Benchmarks sheet via loadBenchmarkConfig()
+// in Config.gs. The getDefaultBenchmarks() function in Config.gs provides fallbacks
+// if the sheet is missing or empty.
 
 // ============================================================================
 // MAIN INSIGHTS GENERATION
@@ -32,8 +28,8 @@ const DEFAULT_BENCHMARKS = {
 function generateInsights(clientData, allValues, validationIssues, kpiConfig, sectionConfig) {
   const insights = [];
 
-  // Load benchmarks (with industry filter if available)
-  const benchmarks = loadBenchmarksForInsights(clientData.industry);
+  // Load benchmarks (with industry and state filters if available)
+  const benchmarks = loadBenchmarksForInsights(clientData.industry, clientData.state);
 
   // 1. Data Quality insight (always first)
   const dataQualityInsight = generateDataQualityInsight(validationIssues, kpiConfig);
@@ -81,33 +77,33 @@ function generateInsights(clientData, allValues, validationIssues, kpiConfig, se
 }
 
 /**
- * Load benchmarks for insights, using config or defaults
+ * Load benchmarks for insights from Config.gs
  * @param {string} industry - Client industry
- * @returns {Object} Benchmarks object
+ * @param {string} state - Client state/province
+ * @returns {Object} Benchmarks object keyed by kpiId
  */
-function loadBenchmarksForInsights(industry) {
+function loadBenchmarksForInsights(industry, state) {
   const benchmarks = {};
 
-  // Start with defaults
-  for (const kpiId in DEFAULT_BENCHMARKS) {
-    benchmarks[kpiId] = { ...DEFAULT_BENCHMARKS[kpiId] };
-  }
-
-  // Try to load from config
+  // Load from config with priority matching (includes fallback to defaults in Config.gs)
   try {
-    const configBenchmarks = loadBenchmarkConfig(industry);
+    const configBenchmarks = loadBenchmarkConfig(industry, state);
 
     for (const benchmark of configBenchmarks) {
-      benchmarks[benchmark.kpiId] = {
-        poor: benchmark.poor,
-        average: benchmark.average,
-        good: benchmark.good,
-        excellent: benchmark.excellent
-      };
+      // Only keep the best match for each KPI (first occurrence wins)
+      if (!benchmarks[benchmark.kpiId]) {
+        benchmarks[benchmark.kpiId] = {
+          poor: benchmark.poor,
+          average: benchmark.average,
+          good: benchmark.good,
+          excellent: benchmark.excellent
+        };
+      }
     }
   } catch (e) {
-    // Use defaults
-    log('Using default benchmarks');
+    log('Error loading benchmarks: ' + e.message);
+    // loadBenchmarkConfig already returns defaults on failure,
+    // but handle complete failure gracefully
   }
 
   return benchmarks;
@@ -184,7 +180,7 @@ function generateBookingInsight(allValues, benchmarks) {
     return null;
   }
 
-  const benchmark = benchmarks.booking_rate || DEFAULT_BENCHMARKS.booking_rate;
+  const benchmark = benchmarks.booking_rate || { poor: 30, average: 50, good: 70, excellent: 85 };
   const rating = getRating(bookingRate, benchmark);
 
   let status, summary, detail;
@@ -244,7 +240,7 @@ function generateSalesInsight(allValues, benchmarks) {
     return null;
   }
 
-  const benchmark = benchmarks.close_rate || DEFAULT_BENCHMARKS.close_rate;
+  const benchmark = benchmarks.close_rate || { poor: 20, average: 35, good: 50, excellent: 65 };
   const rating = getRating(closeRate, benchmark);
 
   let status, summary, detail;
@@ -305,7 +301,7 @@ function generateProfitabilityInsight(allValues, benchmarks) {
     return null;
   }
 
-  const benchmark = benchmarks.profit_margin || DEFAULT_BENCHMARKS.profit_margin;
+  const benchmark = benchmarks.profit_margin || { poor: 5, average: 12, good: 20, excellent: 30 };
 
   let status, summary, detail;
   const recommendations = [];
@@ -382,7 +378,7 @@ function generateCapacityInsight(allValues, benchmarks) {
     return null;
   }
 
-  const benchmark = benchmarks.schedule_efficiency || DEFAULT_BENCHMARKS.schedule_efficiency;
+  const benchmark = benchmarks.schedule_efficiency || { poor: 60, average: 80, good: 95, excellent: 100 };
 
   let status, summary, detail;
   const recommendations = [];

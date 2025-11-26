@@ -81,9 +81,10 @@ function loadSectionConfig() {
 /**
  * Load industry benchmarks from Config_Benchmarks sheet
  * @param {string} [industry] - Optional industry filter
+ * @param {string} [state] - Optional state/province filter
  * @returns {Object[]} Array of benchmark objects
  */
-function loadBenchmarkConfig(industry) {
+function loadBenchmarkConfig(industry, state) {
   try {
     const sheet = getRequiredSheet(SHEET_NAMES.CONFIG_BENCHMARKS);
     const data = sheetToObjects(sheet);
@@ -91,18 +92,23 @@ function loadBenchmarkConfig(industry) {
     let benchmarks = data.map(row => ({
       kpiId: String(row.kpi_id || '').trim(),
       industry: String(row.industry || 'all').toLowerCase().trim(),
+      state: String(row.state || 'all').toLowerCase().trim(),
       poor: parseFloat(row.poor),
       average: parseFloat(row.average),
       good: parseFloat(row.good),
       excellent: parseFloat(row.excellent)
     })).filter(b => b.kpiId);
 
-    // Filter by industry if specified
-    if (industry) {
-      const industryLower = industry.toLowerCase();
-      benchmarks = benchmarks.filter(b =>
-        b.industry === 'all' || b.industry === industryLower
-      );
+    // Filter by industry and state if specified
+    if (industry || state) {
+      const industryLower = industry ? industry.toLowerCase() : null;
+      const stateLower = state ? state.toLowerCase() : null;
+
+      benchmarks = benchmarks.filter(b => {
+        const industryMatch = !industryLower || b.industry === 'all' || b.industry === industryLower;
+        const stateMatch = !stateLower || b.state === 'all' || b.state === stateLower;
+        return industryMatch && stateMatch;
+      });
     }
 
     return benchmarks;
@@ -198,24 +204,51 @@ function getSectionNames(sectionIds) {
 }
 
 /**
- * Get benchmark for a KPI
+ * Get benchmark for a KPI with priority matching
+ * Priority: state+industry > state+all > all+industry > all+all
  * @param {string} kpiId - KPI ID
  * @param {string} [industry] - Industry filter
+ * @param {string} [state] - State/province filter
  * @returns {Object|null} Benchmark object or null
  */
-function getBenchmarkForKPI(kpiId, industry) {
-  const benchmarks = loadBenchmarkConfig(industry);
+function getBenchmarkForKPI(kpiId, industry, state) {
+  const benchmarks = loadBenchmarkConfig(industry, state);
+  const industryLower = industry ? industry.toLowerCase() : null;
+  const stateLower = state ? state.toLowerCase() : null;
 
-  // First try to find industry-specific benchmark
-  if (industry) {
-    const industryBenchmark = benchmarks.find(b =>
-      b.kpiId === kpiId && b.industry === industry.toLowerCase()
-    );
-    if (industryBenchmark) return industryBenchmark;
+  // Filter benchmarks for this KPI
+  const kpiBenchmarks = benchmarks.filter(b => b.kpiId === kpiId);
+
+  if (kpiBenchmarks.length === 0) {
+    return null;
   }
 
-  // Fall back to 'all' industry benchmark
-  return benchmarks.find(b => b.kpiId === kpiId && b.industry === 'all') || null;
+  // Priority 1: Exact match (state + industry)
+  if (industryLower && stateLower) {
+    const exact = kpiBenchmarks.find(b =>
+      b.industry === industryLower && b.state === stateLower
+    );
+    if (exact) return exact;
+  }
+
+  // Priority 2: State match with industry 'all'
+  if (stateLower) {
+    const stateMatch = kpiBenchmarks.find(b =>
+      b.state === stateLower && b.industry === 'all'
+    );
+    if (stateMatch) return stateMatch;
+  }
+
+  // Priority 3: Industry match with state 'all'
+  if (industryLower) {
+    const industryMatch = kpiBenchmarks.find(b =>
+      b.industry === industryLower && b.state === 'all'
+    );
+    if (industryMatch) return industryMatch;
+  }
+
+  // Priority 4: Default (all + all)
+  return kpiBenchmarks.find(b => b.industry === 'all' && b.state === 'all') || null;
 }
 
 // ============================================================================
@@ -419,8 +452,8 @@ function initializeValidationConfig() {
   ];
 
   const sampleData = [
-    ['booking_rate_reconcile', 'Booking Rate Reconciliation', 'Check if booking rate matches leads vs visits', 'reconciliation', 'RECONCILE:total_leads*booking_rate/100:in_home_visits', 0.10, 'error', 'Your reported booking rate doesn\'t match your leads and visits. Expected {expected}, got {actual}.', 'total_leads,booking_rate,in_home_visits', true],
-    ['close_rate_reconcile', 'Close Rate Reconciliation', 'Check if close rate matches visits vs jobs', 'reconciliation', 'RECONCILE:in_home_visits*close_rate/100:jobs_closed', 0.10, 'error', 'Your close rate doesn\'t reconcile with your visits and jobs closed.', 'in_home_visits,close_rate,jobs_closed', true],
+    ['booking_rate_reconcile', 'Booking Rate Reconciliation', 'Check if reported booking rate matches leads vs visits', 'reconciliation', 'RECONCILE:total_leads*reported_booking_rate/100:in_home_visits', 0.10, 'error', 'Your reported booking rate doesn\'t match your leads and visits. Expected {expected}, got {actual}.', 'total_leads,reported_booking_rate,in_home_visits', true],
+    ['close_rate_reconcile', 'Close Rate Reconciliation', 'Check if reported close rate matches visits vs jobs', 'reconciliation', 'RECONCILE:in_home_visits*reported_close_rate/100:jobs_closed', 0.10, 'error', 'Your close rate doesn\'t reconcile with your visits and jobs closed.', 'in_home_visits,reported_close_rate,jobs_closed', true],
     ['revenue_reconcile', 'Revenue Reconciliation', 'Check if revenue matches jobs × ticket', 'reconciliation', 'RECONCILE:jobs_closed*average_ticket:gross_revenue', 0.15, 'warning', 'Your revenue doesn\'t match jobs × average ticket. You may have missing job data.', 'jobs_closed,average_ticket,gross_revenue', true],
     ['profit_positive', 'Profit Should Be Positive', 'Revenue should exceed costs', 'range', 'GREATER:gross_revenue:total_costs', 0, 'warning', 'Your costs exceed your revenue. You\'re operating at a loss.', 'gross_revenue,total_costs', true],
     ['close_rate_range', 'Close Rate Realistic', 'Close rate should be between 0-100%', 'range', 'RANGE:close_rate:0:100', 0, 'error', 'Close rate must be between 0% and 100%.', 'close_rate', true],
@@ -471,9 +504,19 @@ function initializeSectionConfig() {
     [9, 'Management', 'Oversight, strategy, decision-making', 3, 'Capacity & Growth Readiness']
   ];
 
-  sheet.clearContents();
+  // Clear sheet and delete extra rows to prevent empty rows
+  sheet.clear();
+
+  // Set headers and data
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Delete extra rows beyond data to keep sheet clean
+  const lastDataRow = sampleData.length + 1; // +1 for header
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > lastDataRow) {
+    sheet.deleteRows(lastDataRow + 1, maxRows - lastDataRow);
+  }
 
   // Format header row
   sheet.getRange(1, 1, 1, headers.length)
@@ -491,24 +534,29 @@ function initializeSectionConfig() {
 }
 
 /**
- * Create default Config_Benchmarks sheet (for future industry-specific benchmarks)
+ * Create default Config_Benchmarks sheet (with state/province support)
  */
 function initializeBenchmarkConfig() {
   const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG_BENCHMARKS);
 
-  const headers = ['kpi_id', 'industry', 'poor', 'average', 'good', 'excellent', 'notes'];
+  const headers = ['kpi_id', 'industry', 'state', 'poor', 'average', 'good', 'excellent', 'notes'];
 
   const sampleData = [
-    // Default benchmarks (applies to all industries)
-    ['booking_rate', 'all', 30, 50, 70, 85, 'Percentage of leads that become appointments'],
-    ['close_rate', 'all', 20, 35, 50, 65, 'Percentage of appointments that become sales'],
-    ['profit_margin', 'all', 5, 12, 20, 30, 'Net profit as percentage of revenue'],
-    ['schedule_efficiency', 'all', 60, 80, 95, 100, 'Utilization of available capacity'],
+    // Default benchmarks (applies to all industries and states)
+    ['booking_rate', 'all', 'all', 30, 50, 70, 85, 'Percentage of leads that become appointments'],
+    ['close_rate', 'all', 'all', 20, 35, 50, 65, 'Percentage of appointments that become sales'],
+    ['profit_margin', 'all', 'all', 5, 12, 20, 30, 'Net profit as percentage of revenue'],
+    ['schedule_efficiency', 'all', 'all', 60, 80, 95, 100, 'Utilization of available capacity'],
 
-    // Example industry-specific benchmarks (can be expanded)
-    ['booking_rate', 'hvac', 35, 55, 75, 90, 'HVAC typically has higher booking rates'],
-    ['close_rate', 'roofing', 25, 40, 55, 70, 'Roofing often has higher close rates due to urgency'],
-    ['profit_margin', 'plumbing', 8, 15, 22, 32, 'Plumbing service calls tend to have higher margins']
+    // Example industry-specific benchmarks
+    ['booking_rate', 'hvac', 'all', 35, 55, 75, 90, 'HVAC typically has higher booking rates'],
+    ['close_rate', 'roofing', 'all', 25, 40, 55, 70, 'Roofing often has higher close rates due to urgency'],
+    ['profit_margin', 'plumbing', 'all', 8, 15, 22, 32, 'Plumbing service calls tend to have higher margins'],
+
+    // Example state-specific benchmarks
+    ['booking_rate', 'all', 'california', 40, 55, 72, 88, 'California market tends to have higher booking rates'],
+    ['booking_rate', 'all', 'texas', 35, 52, 70, 85, 'Texas market benchmarks'],
+    ['profit_margin', 'all', 'ontario', 8, 14, 22, 30, 'Ontario market has slightly higher margins']
   ];
 
   sheet.clearContents();
@@ -529,8 +577,8 @@ function initializeBenchmarkConfig() {
 
   // Add note about future expansion
   sheet.getRange(sampleData.length + 3, 1).setValue(
-    'Note: Add industry-specific benchmarks by creating rows with the industry name. ' +
-    'Use "all" for benchmarks that apply to all industries.'
+    'Note: Add benchmarks by industry and/or state. Use "all" for benchmarks that apply universally. ' +
+    'Priority: state+industry > state+all > all+industry > all+all'
   );
 
   log('Initialized Config_Benchmarks sheet with sample data');
@@ -548,6 +596,7 @@ function initializeSettings() {
     [SETTINGS_KEYS.FORM_ID, ''],
     [SETTINGS_KEYS.FORM_URL, ''],
     [SETTINGS_KEYS.FORM_RESPONSE_URL, ''],
+    [SETTINGS_KEYS.FORM_RESPONSES_SHEET, ''],
     [SETTINGS_KEYS.LAST_FORM_SYNC, ''],
     [SETTINGS_KEYS.AUTO_ANALYZE, true],
     [SETTINGS_KEYS.VERSION, '1.0'],

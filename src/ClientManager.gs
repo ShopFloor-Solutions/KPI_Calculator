@@ -223,78 +223,155 @@ function generateClientId(companyName) {
 
 /**
  * Process new form submission
- * Called by trigger - generates client_id, calculates period_days
+ * Called by trigger - reads from form responses sheet, maps columns, writes to Clients sheet
  * @param {Object} e - Form submit event
  */
 function processNewSubmission(e) {
   try {
-    const sheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
-    const lastRow = sheet.getLastRow();
+    // Get form responses sheet name from settings
+    const formResponsesSheetName = getSetting(SETTINGS_KEYS.FORM_RESPONSES_SHEET);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    if (lastRow < 2) {
-      log('No data rows found after form submission');
-      return;
+    // Find the form responses sheet
+    let formSheet = null;
+    if (formResponsesSheetName) {
+      formSheet = ss.getSheetByName(formResponsesSheetName);
     }
 
-    // Get headers
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const headersLower = headers.map(h => String(h).toLowerCase());
-
-    // Find column indices
-    const clientIdCol = headersLower.indexOf('client_id') + 1;
-    const companyNameCol = headersLower.indexOf('company_name') + 1;
-    const dataPeriodCol = headersLower.indexOf('data_period') + 1;
-    const periodDaysCol = headersLower.indexOf('period_days') + 1;
-    const analysisStatusCol = headersLower.indexOf('analysis_status') + 1;
-    const timestampCol = headersLower.indexOf('timestamp') + 1;
-
-    // Check if client_id is already set (skip if already processed)
-    const existingClientId = sheet.getRange(lastRow, clientIdCol).getValue();
-    if (existingClientId && String(existingClientId).trim() !== '') {
-      log('Client ID already set, skipping processing');
-      return;
-    }
-
-    // Get company name and data period from the new row
-    const companyName = companyNameCol > 0 ?
-      sheet.getRange(lastRow, companyNameCol).getValue() : 'Unknown';
-    const dataPeriod = dataPeriodCol > 0 ?
-      sheet.getRange(lastRow, dataPeriodCol).getValue() : 'monthly';
-
-    // Generate and set client ID
-    const clientId = generateClientId(companyName);
-    if (clientIdCol > 0) {
-      sheet.getRange(lastRow, clientIdCol).setValue(clientId);
-    }
-
-    // Set timestamp if not already set
-    if (timestampCol > 0) {
-      const existingTimestamp = sheet.getRange(lastRow, timestampCol).getValue();
-      if (!existingTimestamp) {
-        sheet.getRange(lastRow, timestampCol).setValue(new Date());
+    // Fallback: find any sheet starting with "Form Responses"
+    if (!formSheet) {
+      const sheets = ss.getSheets();
+      for (const sheet of sheets) {
+        if (sheet.getName().startsWith('Form Responses')) {
+          formSheet = sheet;
+          break;
+        }
       }
     }
 
-    // Calculate and set period days
-    if (periodDaysCol > 0) {
-      const periodDays = getPeriodDays(dataPeriod);
-      sheet.getRange(lastRow, periodDaysCol).setValue(periodDays);
+    if (!formSheet) {
+      log('No form responses sheet found');
+      return;
     }
 
-    // Set analysis status to pending
-    if (analysisStatusCol > 0) {
-      sheet.getRange(lastRow, analysisStatusCol).setValue(ANALYSIS_STATUS.PENDING);
+    const formLastRow = formSheet.getLastRow();
+    if (formLastRow < 2) {
+      log('No data rows in form responses sheet');
+      return;
     }
 
-    log(`Processed new submission: ${clientId} (${companyName})`);
+    // Get form response headers and last row data
+    const formHeaders = formSheet.getRange(1, 1, 1, formSheet.getLastColumn()).getValues()[0];
+    const formData = formSheet.getRange(formLastRow, 1, 1, formSheet.getLastColumn()).getValues()[0];
 
-    // Return the new client ID for further processing
+    // Build column mapping (form question title -> kpi_id or field name)
+    const columnMapping = buildFormColumnMapping();
+
+    // Map form data to client record
+    const clientRecord = mapFormDataToClient(formHeaders, formData, columnMapping);
+
+    // Generate client ID
+    const clientId = generateClientId(clientRecord.company_name || 'Unknown');
+    clientRecord.client_id = clientId;
+    clientRecord.timestamp = clientRecord.timestamp || new Date();
+    clientRecord.period_days = getPeriodDays(clientRecord.data_period);
+    clientRecord.analysis_status = ANALYSIS_STATUS.PENDING;
+
+    // Write to Clients sheet
+    const clientsSheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
+    writeClientRecord(clientsSheet, clientRecord);
+
+    log(`Processed new submission: ${clientId} (${clientRecord.company_name})`);
+
     return clientId;
 
   } catch (error) {
     logError('Error processing new submission', error);
     throw error;
   }
+}
+
+/**
+ * Build column mapping from form question titles to field names
+ * @returns {Object} Mapping object
+ */
+function buildFormColumnMapping() {
+  const mapping = {
+    // Standard form fields
+    'Timestamp': 'timestamp',
+    'Company Name': 'company_name',
+    'Contact Email': 'contact_email',
+    'Industry': 'industry',
+    'State/Province': 'state',
+    'Data Period': 'data_period',
+    'Notes or Comments': 'notes'
+  };
+
+  // Add KPI name to ID mappings
+  try {
+    const kpiConfig = loadKPIConfig();
+    for (const kpi of kpiConfig) {
+      if (kpi.type === 'input') {
+        mapping[kpi.name] = kpi.id;
+      }
+    }
+  } catch (e) {
+    log('Could not load KPI config for column mapping: ' + e.message);
+  }
+
+  return mapping;
+}
+
+/**
+ * Map form data to client record using column mapping
+ * @param {string[]} headers - Form column headers
+ * @param {any[]} data - Form row data
+ * @param {Object} mapping - Column name mapping
+ * @returns {Object} Client record
+ */
+function mapFormDataToClient(headers, data, mapping) {
+  const record = {};
+
+  for (let i = 0; i < headers.length; i++) {
+    const header = String(headers[i]).trim();
+    const value = data[i];
+
+    // Try to map the header
+    const mappedKey = mapping[header];
+    if (mappedKey) {
+      record[mappedKey] = value;
+    } else {
+      // Use sanitized header as key
+      const sanitizedKey = sanitizeForId(header);
+      if (sanitizedKey) {
+        record[sanitizedKey] = value;
+      }
+    }
+  }
+
+  return record;
+}
+
+/**
+ * Write client record to Clients sheet
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Object} record - Client record
+ */
+function writeClientRecord(sheet, record) {
+  // Get headers from Clients sheet
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const headersLower = headers.map(h => String(h).toLowerCase());
+
+  // Build row data matching header order
+  const rowData = [];
+  for (const header of headersLower) {
+    const value = record[header];
+    rowData.push(value !== undefined ? value : '');
+  }
+
+  // Append row
+  const newRow = sheet.getLastRow() + 1;
+  sheet.getRange(newRow, 1, 1, rowData.length).setValues([rowData]);
 }
 
 // ============================================================================

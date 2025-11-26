@@ -170,13 +170,13 @@ function getClientSelectorData() {
  * Handle client selection from dialog
  * Called from ClientSelector.html
  * @param {string} clientId
- * @param {boolean} runAnalysis - Whether to run analysis after selection
+ * @param {boolean} shouldRunAnalysis - Whether to run analysis after selection
  */
-function handleClientSelection(clientId, runAnalysis) {
+function handleClientSelection(clientId, shouldRunAnalysis) {
   try {
     setActiveClient(clientId);
 
-    if (runAnalysis) {
+    if (shouldRunAnalysis) {
       runAnalysis();
     }
 

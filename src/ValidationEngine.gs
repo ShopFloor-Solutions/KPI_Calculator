@@ -330,16 +330,10 @@ function executeRequires(formula, values) {
     };
   }
 
-  // Also check logical consistency: dependent should not exceed parent
-  // (e.g., in_home_visits should not exceed total_leads)
-  if (dependent > parent) {
-    return {
-      passed: false,
-      actual: dependent,
-      expected: `≤ ${parent}`,
-      variance: (dependent - parent) / parent
-    };
-  }
+  // Note: We intentionally do NOT check if dependent > parent here.
+  // That comparison is not always valid (e.g., in_home_visits can exceed
+  // total_leads if leads come from multiple sources or previous periods).
+  // Use a separate GREATER validation rule if that check is needed.
 
   return { passed: true };
 }
