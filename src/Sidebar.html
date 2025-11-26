@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    /* Reset and base styles */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Roboto', Arial, sans-serif;
+      font-size: 13px;
+      color: #333;
+      background: #fafafa;
+      padding: 16px;
+    }
+
+    /* Headers */
+    h3 {
+      font-size: 16px;
+      font-weight: 500;
+      color: #1a237e;
+      margin-bottom: 16px;
+    }
+
+    h4 {
+      font-size: 13px;
+      font-weight: 500;
+      color: #666;
+      margin: 16px 0 8px 0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Client info card */
+    .client-card {
+      background: white;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .client-name {
+      font-weight: 500;
+      font-size: 14px;
+      color: #1a237e;
+    }
+
+    .client-details {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    /* Status box */
+    .status-box {
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+
+    .status-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    .status-value {
+      font-size: 18px;
+      font-weight: 500;
+    }
+
+    .status-value.valid { color: #4caf50; }
+    .status-value.warnings { color: #ff9800; }
+    .status-value.errors { color: #f44336; }
+
+    .status-counts {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      margin-top: 12px;
+      font-size: 12px;
+    }
+
+    .count-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .count-icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: white;
+    }
+
+    .count-icon.error { background: #f44336; }
+    .count-icon.warning { background: #ff9800; }
+    .count-icon.valid { background: #4caf50; }
+
+    /* Issues list */
+    .issues-list {
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .issue-item {
+      padding: 12px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .issue-item:last-child {
+      border-bottom: none;
+    }
+
+    .issue-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .issue-icon {
+      font-size: 14px;
+    }
+
+    .issue-icon.error { color: #f44336; }
+    .issue-icon.warning { color: #ff9800; }
+    .issue-icon.info { color: #2196f3; }
+
+    .issue-title {
+      font-weight: 500;
+      font-size: 12px;
+    }
+
+    .issue-message {
+      font-size: 11px;
+      color: #666;
+      margin-left: 22px;
+    }
+
+    .issue-sections {
+      font-size: 10px;
+      color: #999;
+      margin-left: 22px;
+      margin-top: 4px;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 24px;
+      color: #999;
+    }
+
+    .empty-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    /* Buttons */
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    button {
+      flex: 1;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button.primary {
+      background: #1a237e;
+      color: white;
+    }
+
+    button.primary:hover {
+      background: #283593;
+    }
+
+    button.secondary {
+      background: #e0e0e0;
+      color: #333;
+    }
+
+    button.secondary:hover {
+      background: #d0d0d0;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Footer */
+    .footer {
+      margin-top: 16px;
+      font-size: 11px;
+      color: #999;
+      text-align: center;
+    }
+
+    /* Loading state */
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .spinner {
+      width: 24px;
+      height: 24px;
+      border: 3px solid #e0e0e0;
+      border-top-color: #1a237e;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* No client state */
+    .no-client {
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    .no-client-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .no-client-text {
+      color: #666;
+      margin-bottom: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div id="content">
+    <div class="loading">
+      <div class="spinner"></div>
+      Loading...
+    </div>
+  </div>
+
+  <script>
+    // Load data on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      loadData();
+    });
+
+    function loadData() {
+      google.script.run
+        .withSuccessHandler(renderDashboard)
+        .withFailureHandler(showError)
+        .getSidebarData();
+    }
+
+    function renderDashboard(data) {
+      const content = document.getElementById('content');
+
+      if (!data.hasClient) {
+        content.innerHTML = `
+          <div class="no-client">
+            <div class="no-client-icon">📋</div>
+            <div class="no-client-text">No client selected</div>
+            <button class="primary" onclick="selectClient()">Select Client</button>
+          </div>
+        `;
+        return;
+      }
+
+      // Status class
+      const statusClass = data.status.toLowerCase();
+
+      // Build issues HTML
+      let issuesHtml = '';
+      if (data.issues && data.issues.length > 0) {
+        issuesHtml = data.issues.map(issue => {
+          const iconClass = issue.severity.toLowerCase();
+          const icon = iconClass === 'error' ? '✗' : (iconClass === 'warning' ? '⚠' : 'ℹ');
+          return `
+            <div class="issue-item">
+              <div class="issue-header">
+                <span class="issue-icon ${iconClass}">${icon}</span>
+                <span class="issue-title">${escapeHtml(issue.ruleName)}</span>
+              </div>
+              <div class="issue-message">${escapeHtml(issue.message)}</div>
+              ${issue.sections ? `<div class="issue-sections">Sections: ${escapeHtml(issue.sections)}</div>` : ''}
+            </div>
+          `;
+        }).join('');
+      } else {
+        issuesHtml = `
+          <div class="empty-state">
+            <div class="empty-icon">✓</div>
+            <div>No validation issues found</div>
+          </div>
+        `;
+      }
+
+      content.innerHTML = `
+        <h3>Validation Dashboard</h3>
+
+        <div class="client-card">
+          <div class="client-name">${escapeHtml(data.client.name)}</div>
+          <div class="client-details">${escapeHtml(data.client.industry)} | ${escapeHtml(data.client.submittedAt)}</div>
+        </div>
+
+        <div class="status-box">
+          <div class="status-label">Status</div>
+          <div class="status-value ${statusClass}">${data.status}</div>
+          <div class="status-counts">
+            <div class="count-item">
+              <span class="count-icon error">✗</span>
+              <span>${data.errorCount || 0} errors</span>
+            </div>
+            <div class="count-item">
+              <span class="count-icon warning">⚠</span>
+              <span>${data.warningCount || 0} warnings</span>
+            </div>
+          </div>
+        </div>
+
+        <h4>Issues</h4>
+        <div class="issues-list">
+          ${issuesHtml}
+        </div>
+
+        <div class="button-group">
+          <button class="secondary" onclick="refresh()">↻ Refresh</button>
+          <button class="primary" onclick="runAnalysis()">Run Analysis</button>
+        </div>
+
+        <div class="footer">
+          Last analyzed: ${data.lastAnalyzed || 'Never'}
+        </div>
+      `;
+    }
+
+    function showError(error) {
+      const content = document.getElementById('content');
+      content.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⚠</div>
+          <div>Error loading data</div>
+          <div style="font-size: 11px; margin-top: 8px;">${escapeHtml(error.message || 'Unknown error')}</div>
+          <button class="secondary" style="margin-top: 16px;" onclick="loadData()">Retry</button>
+        </div>
+      `;
+    }
+
+    function refresh() {
+      const content = document.getElementById('content');
+      content.innerHTML = '<div class="loading"><div class="spinner"></div>Refreshing...</div>';
+      loadData();
+    }
+
+    function runAnalysis() {
+      const content = document.getElementById('content');
+      content.innerHTML = '<div class="loading"><div class="spinner"></div>Running analysis...</div>';
+
+      google.script.run
+        .withSuccessHandler(function() {
+          loadData();
+        })
+        .withFailureHandler(function(error) {
+          showError(error);
+        })
+        .handleRunAnalysis();
+    }
+
+    function selectClient() {
+      google.script.run.showClientSelector();
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
