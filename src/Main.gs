@@ -51,6 +51,7 @@ function createMenu() {
     .addSeparator()
     .addSubMenu(ui.createMenu('Help')
       .addItem('Quick Start Guide', 'showHelp')
+      .addItem('Generate README Sheet', 'initializeReadmeSheet')
       .addItem('About', 'showAbout'))
     .addToUi();
 
