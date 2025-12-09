@@ -71,6 +71,7 @@ function loadValidationConfig() {
       severity: String(row.severity || 'warning').toLowerCase().trim(),
       message: String(row.message || '').trim(),
       affectedKPIs: parseAffectedKPIs(row.affected_kpis),
+      formTier: String(row.form_tier || '').toLowerCase().trim(),
       active: true
     }))
     .filter(rule => rule.id && rule.formula); // Filter out incomplete rules
@@ -189,6 +190,54 @@ function getInputKPIsForTiers(tiers) {
       const orderB = b.tierOrder !== 999 ? b.tierOrder : b.formOrder;
       return orderA - orderB;
     });
+}
+
+/**
+ * Get all KPIs (input + calculated) for a client's tier level (cumulative)
+ * Excludes any KPIs without a form_tier classification
+ * Tier hierarchy: onboarding < detailed < section_deep
+ * @param {Object[]} kpiConfig - Full KPI configuration
+ * @param {string} clientTier - Client's form tier
+ * @returns {Object[]} KPIs applicable to this tier
+ */
+function getKPIsForTier(kpiConfig, clientTier) {
+  const tierOrder = { 'onboarding': 1, 'detailed': 2, 'section_deep': 3 };
+  const clientTierNum = tierOrder[clientTier.toLowerCase()] || 0;
+
+  // If client tier is invalid or not set, return empty - caller should prompt user
+  if (clientTierNum === 0) {
+    return [];
+  }
+
+  return kpiConfig.filter(kpi => {
+    // Skip unclassified KPIs (no form_tier)
+    if (!kpi.formTier || kpi.formTier === '') {
+      return false;
+    }
+
+    const kpiTierNum = tierOrder[kpi.formTier] || 0;
+    // KPI is included if its tier <= client's tier
+    return kpiTierNum > 0 && kpiTierNum <= clientTierNum;
+  });
+}
+
+/**
+ * Get tiers included for a given client tier (cumulative)
+ * @param {string} clientTier - Client's form tier
+ * @returns {string[]} Array of tier names included
+ */
+function getTiersForClientTier(clientTier) {
+  const tier = clientTier.toLowerCase();
+  switch (tier) {
+    case 'onboarding':
+      return ['onboarding'];
+    case 'detailed':
+      return ['onboarding', 'detailed'];
+    case 'section_deep':
+      return ['onboarding', 'detailed', 'section_deep'];
+    default:
+      return [];
+  }
 }
 
 /**

@@ -37,9 +37,10 @@ const COLORS = {
 
 /**
  * Generate complete results for a client
+ * Now tier-aware: only shows KPIs applicable to client's form_tier
  * Clears and rebuilds Results and Validation_Log sheets
  * @param {string} clientId - Client ID
- * @param {Object} clientData - Client data object
+ * @param {Object} clientData - Client data object (includes formTier)
  * @param {Object} allValues - All KPI values (raw + calculated)
  * @param {Object} validationResult - Validation result {status, issues}
  * @param {Object[]} insights - Generated insights
@@ -55,34 +56,42 @@ function generateResults(clientId, clientData, allValues, validationResult, insi
   const resultsSheet = getRequiredSheet(SHEET_NAMES.RESULTS);
   const validationSheet = getRequiredSheet(SHEET_NAMES.VALIDATION_LOG);
 
+  // Get tier-filtered KPIs
+  const clientTier = clientData.formTier || '';
+  let tierKPIs = kpiConfig;
+  if (clientTier) {
+    tierKPIs = getKPIsForTier(kpiConfig, clientTier);
+    log(`Results filtered to ${tierKPIs.length} KPIs for tier: ${clientTier}`);
+  }
+
   // Write results
   let currentRow = 1;
 
-  // Header section
+  // Header section (now includes tier info)
   currentRow = writeResultsHeader(resultsSheet, currentRow, clientData, validationResult.status);
   currentRow += 1; // Blank row
 
-  // Volume metrics section
+  // Volume metrics section (filtered by tier)
   currentRow = writeKPISection(
     resultsSheet,
     currentRow,
     'VOLUME METRICS',
     'volume',
     allValues,
-    kpiConfig,
+    tierKPIs,  // Use tier-filtered KPIs
     sectionConfig,
     validationResult.issues
   );
   currentRow += 1; // Blank row
 
-  // Efficiency metrics section
+  // Efficiency metrics section (filtered by tier)
   currentRow = writeKPISection(
     resultsSheet,
     currentRow,
     'EFFICIENCY METRICS',
     'efficiency',
     allValues,
-    kpiConfig,
+    tierKPIs,  // Use tier-filtered KPIs
     sectionConfig,
     validationResult.issues
   );
@@ -95,7 +104,7 @@ function generateResults(clientId, clientData, allValues, validationResult, insi
   formatResultsSheet(resultsSheet);
 
   // Write validation log
-  writeValidationLog(validationSheet, validationResult.issues, kpiConfig, sectionConfig);
+  writeValidationLog(validationSheet, validationResult.issues, tierKPIs, sectionConfig);
 
   // Flush changes
   SpreadsheetApp.flush();
@@ -146,6 +155,7 @@ function clearValidationLogSheet() {
 
 /**
  * Write header section to Results sheet
+ * Now includes tier information
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
  * @param {number} startRow
  * @param {Object} clientData
@@ -174,6 +184,25 @@ function writeResultsHeader(sheet, startRow, clientData, overallStatus) {
     .setHorizontalAlignment('center')
     .setFontColor('#666666');
   row++;
+
+  // Tier info (if set)
+  if (clientData.formTier) {
+    const tierLabels = {
+      'onboarding': 'Quick Assessment',
+      'detailed': 'Comprehensive Diagnostic',
+      'section_deep': 'Full Operational Analysis'
+    };
+    const tierLabel = tierLabels[clientData.formTier.toLowerCase()] || clientData.formTier;
+    const tierText = `Assessment Type: ${tierLabel}`;
+    sheet.getRange(row, 1).setValue(tierText);
+    sheet.getRange(row, 1, 1, 6).merge();
+    sheet.getRange(row, 1)
+      .setFontSize(11)
+      .setHorizontalAlignment('center')
+      .setFontColor('#1565c0')
+      .setFontStyle('italic');
+    row++;
+  }
 
   // Analysis timestamp
   const timestamp = `Analyzed: ${formatDate(new Date())}`;

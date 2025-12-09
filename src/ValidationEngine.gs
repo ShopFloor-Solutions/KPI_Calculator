@@ -11,19 +11,43 @@
 
 /**
  * Run all validation rules against client data
+ * Now tier-aware: filters rules by client's form_tier
  * @param {Object} allValues - Raw + calculated KPI values
  * @param {Object[]} validationConfig - Validation rules
  * @param {Object[]} [kpiConfig] - KPI definitions (for section lookup)
- * @returns {Object} {status: string, issues: ValidationIssue[]}
+ * @param {string} [clientTier] - Client's form tier (onboarding, detailed, section_deep)
+ * @returns {Object} {status: string, issues: ValidationIssue[], tierFiltered: string}
  */
-function validateAll(allValues, validationConfig, kpiConfig) {
+function validateAll(allValues, validationConfig, kpiConfig, clientTier) {
   const issues = [];
+  let rulesSkipped = 0;
+
+  // Get KPIs applicable to this tier (for filtering affected KPIs)
+  const tierKPIs = clientTier ? getKPIsForTier(kpiConfig || [], clientTier) : kpiConfig || [];
+  const tierKPIIds = new Set(tierKPIs.map(k => k.id.toLowerCase()));
 
   // Sort validations by type (dependency first, then range, then reconciliation)
   const sortedRules = sortValidationRules(validationConfig);
 
   for (const rule of sortedRules) {
     try {
+      // Skip rules that don't apply to this tier
+      if (clientTier && !ruleAppliesToTier(rule, clientTier)) {
+        rulesSkipped++;
+        continue;
+      }
+
+      // Skip rules where affected KPIs are not in this tier
+      if (clientTier && rule.affectedKPIs && rule.affectedKPIs.length > 0) {
+        const allKPIsInTier = rule.affectedKPIs.every(id =>
+          tierKPIIds.has(id.toLowerCase())
+        );
+        if (!allKPIsInTier) {
+          rulesSkipped++;
+          continue;
+        }
+      }
+
       const issue = runValidation(rule, allValues, kpiConfig);
 
       if (issue) {
@@ -51,8 +75,30 @@ function validateAll(allValues, validationConfig, kpiConfig) {
 
   return {
     status: status,
-    issues: issues
+    issues: issues,
+    tierFiltered: clientTier || 'all',
+    rulesRun: sortedRules.length - rulesSkipped,
+    rulesSkipped: rulesSkipped
   };
+}
+
+/**
+ * Check if a validation rule applies to a given client tier
+ * Rules apply cumulatively: onboarding rules run for all tiers,
+ * detailed rules run for detailed+, section_deep rules only for section_deep
+ * @param {Object} rule - Validation rule
+ * @param {string} clientTier - Client's form tier
+ * @returns {boolean} True if rule should run for this tier
+ */
+function ruleAppliesToTier(rule, clientTier) {
+  const ruleTier = rule.formTier || 'onboarding';  // Default rules to onboarding
+  const tierOrder = { 'onboarding': 1, 'detailed': 2, 'section_deep': 3 };
+
+  const ruleTierNum = tierOrder[ruleTier.toLowerCase()] || 1;
+  const clientTierNum = tierOrder[clientTier.toLowerCase()] || 0;
+
+  // Rule applies if client tier >= rule tier
+  return clientTierNum >= ruleTierNum;
 }
 
 /**
