@@ -145,6 +145,14 @@ function runValidation(rule, values, kpiConfig) {
         result = executeRange(rule.formula, values);
       } else if (rule.formula.startsWith('GREATER:')) {
         result = executeGreater(rule.formula, values);
+      } else if (rule.formula.startsWith('GTE:')) {
+        result = executeGTE(rule.formula, values);
+      } else if (rule.formula.startsWith('GT:')) {
+        result = executeGT(rule.formula, values);
+      } else if (rule.formula.startsWith('RATIO_MIN:')) {
+        result = executeRatioMin(rule.formula, values);
+      } else if (rule.formula.startsWith('RATIO_MAX:')) {
+        result = executeRatioMax(rule.formula, values);
       } else {
         result = { passed: true };
       }
@@ -409,6 +417,162 @@ function executeRequires(formula, values) {
 }
 
 /**
+ * Execute GTE (greater than or equal) validation
+ * Check if a >= b
+ * Format: GTE:a:b
+ * @param {string} formula
+ * @param {Object} values
+ * @returns {Object} {passed: boolean, actual, expected}
+ */
+function executeGTE(formula, values) {
+  const parts = formula.split(':');
+
+  if (parts.length < 3) {
+    return { passed: true };
+  }
+
+  const aId = parts[1];
+  const bId = parts[2];
+  const a = getValue(values, aId);
+  const b = getValue(values, bId);
+
+  // If either value is missing, skip validation
+  if (isEmpty(a) || isEmpty(b)) {
+    return { passed: true };
+  }
+
+  const passed = a >= b;
+
+  return {
+    passed: passed,
+    actual: a,
+    expected: `>= ${b}`,
+    variance: passed ? 0 : b - a
+  };
+}
+
+/**
+ * Execute GT (greater than) validation
+ * Check if a > b (alias for GREATER, but uses getValue for case-insensitivity)
+ * Format: GT:a:b
+ * @param {string} formula
+ * @param {Object} values
+ * @returns {Object} {passed: boolean, actual, expected}
+ */
+function executeGT(formula, values) {
+  const parts = formula.split(':');
+
+  if (parts.length < 3) {
+    return { passed: true };
+  }
+
+  const aId = parts[1];
+  const bId = parts[2];
+  const a = getValue(values, aId);
+  const b = getValue(values, bId);
+
+  // If either value is missing, skip validation
+  if (isEmpty(a) || isEmpty(b)) {
+    return { passed: true };
+  }
+
+  const passed = a > b;
+
+  return {
+    passed: passed,
+    actual: a,
+    expected: `> ${b}`,
+    variance: passed ? 0 : b - a
+  };
+}
+
+/**
+ * Execute RATIO_MIN validation
+ * Check if a/b >= min_ratio
+ * Format: RATIO_MIN:a:b:min_ratio
+ * @param {string} formula
+ * @param {Object} values
+ * @returns {Object} {passed: boolean, actual, expected, variance}
+ */
+function executeRatioMin(formula, values) {
+  const parts = formula.split(':');
+
+  if (parts.length < 4) {
+    return { passed: true };
+  }
+
+  const aId = parts[1];
+  const bId = parts[2];
+  const minRatio = parseFloat(parts[3]);
+
+  const a = getValue(values, aId);
+  const b = getValue(values, bId);
+
+  // If either value is missing or min is invalid, skip validation
+  if (isEmpty(a) || isEmpty(b) || isNaN(minRatio)) {
+    return { passed: true };
+  }
+
+  // Avoid division by zero
+  if (b === 0) {
+    return { passed: true };
+  }
+
+  const actualRatio = a / b;
+  const passed = actualRatio >= minRatio;
+
+  return {
+    passed: passed,
+    actual: actualRatio.toFixed(2),
+    expected: `>= ${minRatio}`,
+    variance: passed ? 0 : minRatio - actualRatio
+  };
+}
+
+/**
+ * Execute RATIO_MAX validation
+ * Check if a/b <= max_ratio
+ * Format: RATIO_MAX:a:b:max_ratio
+ * @param {string} formula
+ * @param {Object} values
+ * @returns {Object} {passed: boolean, actual, expected, variance}
+ */
+function executeRatioMax(formula, values) {
+  const parts = formula.split(':');
+
+  if (parts.length < 4) {
+    return { passed: true };
+  }
+
+  const aId = parts[1];
+  const bId = parts[2];
+  const maxRatio = parseFloat(parts[3]);
+
+  const a = getValue(values, aId);
+  const b = getValue(values, bId);
+
+  // If either value is missing or max is invalid, skip validation
+  if (isEmpty(a) || isEmpty(b) || isNaN(maxRatio)) {
+    return { passed: true };
+  }
+
+  // Avoid division by zero
+  if (b === 0) {
+    return { passed: true };
+  }
+
+  const actualRatio = a / b;
+  const passed = actualRatio <= maxRatio;
+
+  return {
+    passed: passed,
+    actual: actualRatio.toFixed(2),
+    expected: `<= ${maxRatio}`,
+    variance: passed ? 0 : actualRatio - maxRatio
+  };
+}
+
+/**
  * Execute generic validation (tries to determine type from formula)
  * @param {string} formula
  * @param {Object} values
@@ -422,6 +586,14 @@ function executeGenericValidation(formula, values, tolerance) {
     return executeRange(formula, values);
   } else if (formula.startsWith('GREATER:')) {
     return executeGreater(formula, values);
+  } else if (formula.startsWith('GTE:')) {
+    return executeGTE(formula, values);
+  } else if (formula.startsWith('GT:')) {
+    return executeGT(formula, values);
+  } else if (formula.startsWith('RATIO_MIN:')) {
+    return executeRatioMin(formula, values);
+  } else if (formula.startsWith('RATIO_MAX:')) {
+    return executeRatioMax(formula, values);
   } else if (formula.startsWith('EQUALS:')) {
     return executeEquals(formula, values, tolerance);
   } else if (formula.startsWith('REQUIRES:')) {
@@ -429,6 +601,33 @@ function executeGenericValidation(formula, values, tolerance) {
   }
 
   return { passed: true };
+}
+
+// ============================================================================
+// VALUE LOOKUP HELPER
+// ============================================================================
+
+/**
+ * Get a value from the values object with case-insensitive key lookup
+ * @param {Object} values - All KPI values
+ * @param {string} key - The key to look up
+ * @returns {*} The value or undefined if not found
+ */
+function getValue(values, key) {
+  // Try exact match first
+  if (values.hasOwnProperty(key)) {
+    return values[key];
+  }
+
+  // Fall back to case-insensitive lookup
+  const keyLower = key.toLowerCase();
+  for (const k of Object.keys(values)) {
+    if (k.toLowerCase() === keyLower) {
+      return values[k];
+    }
+  }
+
+  return undefined;
 }
 
 // ============================================================================

@@ -44,10 +44,19 @@ function getClientData(clientId) {
   const kpiConfig = loadKPIConfig();
   const inputKPIs = kpiConfig.filter(k => k.type === 'input');
 
-  // Extract raw inputs from client data
+  // Build a lowercase key map for case-insensitive lookup
+  // (sheetToObjects lowercases all headers, but KPI IDs may have mixed case)
+  const clientKeysLower = {};
+  for (const key of Object.keys(client)) {
+    clientKeysLower[key.toLowerCase()] = key;
+  }
+
+  // Extract raw inputs from client data (CASE-INSENSITIVE)
   const rawInputs = {};
   for (const kpi of inputKPIs) {
-    const value = client[kpi.id];
+    const kpiIdLower = kpi.id.toLowerCase();
+    const actualKey = clientKeysLower[kpiIdLower];
+    const value = actualKey ? client[actualKey] : undefined;
     rawInputs[kpi.id] = parseNumber(value);
   }
 
@@ -894,6 +903,183 @@ function updateClientFormTier(clientId, newTier) {
 
   sheet.getRange(row, tierCol).setValue(newTier);
   log(`Updated client ${clientId} form_tier to ${newTier}`);
+}
+
+// ============================================================================
+// DEBUG UTILITIES
+// ============================================================================
+
+/**
+ * Debug function to diagnose client data reading issues
+ * Logs detailed information about:
+ * - Raw client record keys and their values
+ * - KPI config input IDs
+ * - Case sensitivity matching
+ * - Values successfully retrieved vs missing
+ *
+ * @param {string} clientId - Client ID to debug (uses active client if not provided)
+ * @returns {Object} Debug report object
+ */
+function debugClientDataReading(clientId) {
+  const report = {
+    timestamp: new Date().toISOString(),
+    clientId: clientId || getActiveClientId(),
+    issues: [],
+    warnings: [],
+    details: {}
+  };
+
+  try {
+    // Get raw client record
+    const client = getClientById(report.clientId);
+    if (!client) {
+      report.issues.push(`Client not found: ${report.clientId}`);
+      log('DEBUG: ' + JSON.stringify(report, null, 2));
+      return report;
+    }
+
+    // Get client record keys (after sheetToObjects lowercasing)
+    const clientKeys = Object.keys(client);
+    report.details.clientRecordKeys = clientKeys;
+
+    // Get KPI config
+    const kpiConfig = loadKPIConfig();
+    const inputKPIs = kpiConfig.filter(k => k.type === 'input');
+    report.details.inputKPICount = inputKPIs.length;
+    report.details.inputKPIIds = inputKPIs.map(k => k.id);
+
+    // Check case sensitivity issues
+    const clientKeysLower = {};
+    for (const key of clientKeys) {
+      clientKeysLower[key.toLowerCase()] = key;
+    }
+
+    const matched = [];
+    const mismatched = [];
+    const missing = [];
+
+    for (const kpi of inputKPIs) {
+      const kpiId = kpi.id;
+      const kpiIdLower = kpiId.toLowerCase();
+      const actualKey = clientKeysLower[kpiIdLower];
+
+      if (!actualKey) {
+        missing.push({
+          kpiId: kpiId,
+          reason: 'No matching key in client record (even case-insensitive)'
+        });
+      } else if (actualKey === kpiId) {
+        matched.push({
+          kpiId: kpiId,
+          value: client[actualKey],
+          match: 'exact'
+        });
+      } else {
+        mismatched.push({
+          kpiId: kpiId,
+          actualKey: actualKey,
+          value: client[actualKey],
+          match: 'case-insensitive'
+        });
+      }
+    }
+
+    report.details.matched = matched;
+    report.details.mismatched = mismatched;
+    report.details.missing = missing;
+
+    // Add summary statistics
+    report.summary = {
+      totalInputKPIs: inputKPIs.length,
+      exactMatches: matched.length,
+      caseInsensitiveMatches: mismatched.length,
+      missingKeys: missing.length
+    };
+
+    // Generate warnings and issues
+    if (mismatched.length > 0) {
+      report.warnings.push(
+        `${mismatched.length} KPI IDs required case-insensitive matching. ` +
+        `This is handled correctly but indicates potential case inconsistencies in your sheets.`
+      );
+    }
+
+    if (missing.length > 0) {
+      report.issues.push(
+        `${missing.length} KPI IDs have no matching column in Clients sheet. ` +
+        `Run syncClientsSchema() to add missing columns.`
+      );
+    }
+
+    // Log the report
+    log('=== DEBUG CLIENT DATA READING REPORT ===');
+    log(`Client ID: ${report.clientId}`);
+    log(`Input KPIs: ${inputKPIs.length}`);
+    log(`Exact matches: ${matched.length}`);
+    log(`Case-insensitive matches: ${mismatched.length}`);
+    log(`Missing: ${missing.length}`);
+
+    if (mismatched.length > 0) {
+      log('Case mismatches:');
+      for (const m of mismatched.slice(0, 10)) {
+        log(`  KPI "${m.kpiId}" -> actual key "${m.actualKey}"`);
+      }
+      if (mismatched.length > 10) {
+        log(`  ... and ${mismatched.length - 10} more`);
+      }
+    }
+
+    if (missing.length > 0) {
+      log('Missing KPIs:');
+      for (const m of missing.slice(0, 10)) {
+        log(`  "${m.kpiId}"`);
+      }
+      if (missing.length > 10) {
+        log(`  ... and ${missing.length - 10} more`);
+      }
+    }
+
+    log('========================================');
+
+  } catch (error) {
+    report.issues.push(`Error during debug: ${error.message}`);
+    logError('debugClientDataReading error', error);
+  }
+
+  return report;
+}
+
+/**
+ * Menu handler to run debug on active client
+ */
+function debugActiveClient() {
+  const clientId = getActiveClientId();
+  if (!clientId) {
+    SpreadsheetApp.getUi().alert('No active client selected. Please select a client first.');
+    return;
+  }
+
+  const report = debugClientDataReading(clientId);
+
+  // Show summary in UI
+  const ui = SpreadsheetApp.getUi();
+  let message = `Debug Report for ${clientId}\n\n`;
+  message += `Total Input KPIs: ${report.summary?.totalInputKPIs || 0}\n`;
+  message += `Exact matches: ${report.summary?.exactMatches || 0}\n`;
+  message += `Case-insensitive matches: ${report.summary?.caseInsensitiveMatches || 0}\n`;
+  message += `Missing keys: ${report.summary?.missingKeys || 0}\n\n`;
+
+  if (report.issues.length > 0) {
+    message += 'Issues:\n' + report.issues.join('\n') + '\n\n';
+  }
+
+  if (report.warnings.length > 0) {
+    message += 'Warnings:\n' + report.warnings.join('\n');
+  }
+
+  message += '\n\nFull details logged to Apps Script console.';
+
+  ui.alert('Client Data Debug Report', message, ui.ButtonSet.OK);
 }
 
 /**
