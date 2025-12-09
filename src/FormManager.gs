@@ -113,13 +113,161 @@ function createClientIntakeForm() {
   }
 }
 
+// ============================================================================
+// TIERED FORM CREATION
+// ============================================================================
+
 /**
- * Build form questions from KPI config
- * @param {GoogleAppsScript.Forms.Form} form
- * @param {Object[]} inputKPIs
+ * Create Onboarding Form (Quick assessment with essential KPIs)
  */
-function buildFormQuestions(form, inputKPIs) {
-  // ---- Section 1: Company Information ----
+function createOnboardingForm() {
+  return createTieredForm('onboarding');
+}
+
+/**
+ * Create Detailed Form (Onboarding + Detailed tier KPIs)
+ */
+function createDetailedForm() {
+  return createTieredForm('detailed');
+}
+
+/**
+ * Create Full Form (All input KPIs)
+ */
+function createFullForm() {
+  return createTieredForm('all');
+}
+
+/**
+ * Create form for a specific tier
+ * @param {string} tier - "onboarding", "detailed", or "all"
+ * @returns {string} Form URL or null
+ */
+function createTieredForm(tier = 'onboarding') {
+  try {
+    // Check for existing form with responses
+    const existingFormId = getSetting(SETTINGS_KEYS.FORM_ID);
+    if (existingFormId) {
+      const hasResponses = checkFormHasResponses(existingFormId);
+
+      if (hasResponses) {
+        const proceed = showYesNoConfirmation(
+          'Warning: Existing Form Has Responses',
+          'The existing form has responses. Recreating will unlink those responses.\n\n' +
+          'Existing responses will remain in the Clients sheet, but the form link will be broken.\n\n' +
+          'Are you sure you want to recreate the form?'
+        );
+
+        if (!proceed) {
+          showToast('Form creation cancelled', 'Form Manager', 3);
+          return null;
+        }
+      }
+
+      // Delete old form
+      try {
+        deleteForm();
+      } catch (e) {
+        log('Could not delete old form: ' + e.message);
+      }
+    }
+
+    // Determine KPIs and form title based on tier
+    let inputKPIs;
+    let formTitle;
+    let formDescription;
+
+    switch (tier.toLowerCase()) {
+      case 'onboarding':
+        inputKPIs = getInputKPIs('onboarding');
+        formTitle = 'Quick Business Assessment - ShopFloor Solutions';
+        formDescription = 'This quick assessment captures the essential metrics we need to understand your business.\n\n' +
+          'It takes about 10-15 minutes to complete. All fields marked with * are required.';
+        break;
+
+      case 'detailed':
+        inputKPIs = getInputKPIsForTiers(['onboarding', 'detailed']);
+        formTitle = 'Comprehensive Business Assessment - ShopFloor Solutions';
+        formDescription = 'This comprehensive assessment provides a deeper view of your operations.\n\n' +
+          'It takes about 20-30 minutes to complete. Leave fields blank if you don\'t track that metric.';
+        break;
+
+      case 'all':
+      default:
+        inputKPIs = getInputKPIs(); // All input KPIs
+        formTitle = 'Full Diagnostic Assessment - ShopFloor Solutions';
+        formDescription = 'This full diagnostic captures all operational metrics for a complete analysis.\n\n' +
+          'It may take 30-45 minutes to complete. Skip sections that don\'t apply to your business.';
+        break;
+    }
+
+    if (inputKPIs.length === 0) {
+      showAlert(`No input KPIs found for tier "${tier}". Please check Config_KPIs.`);
+      return null;
+    }
+
+    showToast(`Creating ${tier} form with ${inputKPIs.length} questions...`, 'Form Manager', 5);
+
+    // Create form
+    const form = FormApp.create(formTitle);
+
+    // Set form properties
+    form.setDescription(formDescription);
+    form.setCollectEmail(false);
+    form.setAllowResponseEdits(false);
+    form.setLimitOneResponsePerUser(false);
+    form.setProgressBar(true);
+    form.setConfirmationMessage(
+      'Thank you for your submission!\n\n' +
+      'Our team will analyze your data and reach out with insights.'
+    );
+
+    // Build form questions organized by section
+    buildFormQuestionsBySection(form, inputKPIs);
+
+    // Link form to spreadsheet
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
+
+    // Store form info in settings
+    setSetting(SETTINGS_KEYS.FORM_ID, form.getId());
+    setSetting(SETTINGS_KEYS.FORM_URL, form.getEditUrl());
+    setSetting(SETTINGS_KEYS.FORM_RESPONSE_URL, form.getPublishedUrl());
+    setSetting(SETTINGS_KEYS.LAST_FORM_SYNC, new Date().toISOString());
+
+    // Install form submit trigger
+    installFormTrigger(form.getId());
+
+    // Handle form responses sheet
+    SpreadsheetApp.flush();
+    Utilities.sleep(2000);
+    renameFormResponsesSheet();
+
+    showAlert(
+      `Form created successfully!\n\n` +
+      `Tier: ${tier}\n` +
+      `Questions: ${inputKPIs.length}\n\n` +
+      `Form URL:\n${form.getPublishedUrl()}\n\n` +
+      'Access via menu: Form Management → Get Form URL'
+    );
+
+    log(`Tiered form created: ${tier} with ${inputKPIs.length} questions`);
+    return form.getPublishedUrl();
+
+  } catch (error) {
+    logError('Error creating tiered form', error);
+    showAlert('Error creating form: ' + error.message);
+    return null;
+  }
+}
+
+/**
+ * Build form questions organized by business section
+ * @param {GoogleAppsScript.Forms.Form} form
+ * @param {Object[]} inputKPIs - Pre-filtered and sorted KPIs
+ */
+function buildFormQuestionsBySection(form, inputKPIs) {
+  // ---- Section 1: Company Information (Always first) ----
   form.addPageBreakItem()
     .setTitle('Company Information')
     .setHelpText('Please provide your company details.');
@@ -157,35 +305,67 @@ function buildFormQuestions(form, inputKPIs) {
     .setHelpText('What time period does this data represent?')
     .setChoiceValues(DATA_PERIODS.map(p => p.label));
 
-  // ---- Section 2: Volume Metrics ----
-  const volumeKPIs = inputKPIs.filter(k => k.category === 'volume');
+  // ---- Group KPIs by category/section ----
+  const sections = {};
+  for (const kpi of inputKPIs) {
+    const section = kpi.category || 'General';
+    if (!sections[section]) {
+      sections[section] = [];
+    }
+    sections[section].push(kpi);
+  }
 
-  if (volumeKPIs.length > 0) {
+  // Define section order and display info
+  const sectionOrder = [
+    { key: 'volume', name: 'Volume Metrics', help: 'Size and capacity of your operation' },
+    { key: 'efficiency', name: 'Efficiency Metrics', help: 'Performance relative to capacity' },
+    { key: 'Marketing', name: 'Marketing', help: 'Lead generation, advertising, and brand awareness' },
+    { key: 'CSR/Call Center', name: 'CSR / Call Center', help: 'Call handling, booking, and customer intake' },
+    { key: 'Sales', name: 'Sales', help: 'In-home visits, proposals, and closing' },
+    { key: 'Field Operations', name: 'Field Operations', help: 'Technicians, installs, and service delivery' },
+    { key: 'Scheduling/Dispatch', name: 'Scheduling & Dispatch', help: 'Job assignment, routing, and capacity' },
+    { key: 'Inventory/Warehouse', name: 'Inventory & Warehouse', help: 'Parts, materials, and truck stock' },
+    { key: 'Finance/Accounting', name: 'Finance & Accounting', help: 'Revenue, costs, invoicing, and cash flow' },
+    { key: 'HR/Training', name: 'HR & Training', help: 'Hiring, onboarding, and skill development' },
+    { key: 'Management', name: 'Management', help: 'Oversight, strategy, and decision-making' }
+  ];
+
+  // Create form sections for each category with KPIs
+  for (const sectionDef of sectionOrder) {
+    const sectionKPIs = sections[sectionDef.key];
+    if (!sectionKPIs || sectionKPIs.length === 0) continue;
+
+    // Add page break / section header
     form.addPageBreakItem()
-      .setTitle('Volume Metrics')
-      .setHelpText('These metrics measure the size and capacity of your operation.\n\n' +
-        'Enter the values for the time period you selected above.');
+      .setTitle(sectionDef.name)
+      .setHelpText(sectionDef.help + '\n\nLeave blank if you don\'t track this metric.');
 
-    for (const kpi of volumeKPIs) {
+    // Add questions for this section (already sorted by tierOrder)
+    for (const kpi of sectionKPIs) {
       createFormQuestion(form, kpi);
     }
   }
 
-  // ---- Section 3: Efficiency Metrics ----
-  const efficiencyKPIs = inputKPIs.filter(k => k.category === 'efficiency');
+  // Handle any uncategorized KPIs
+  const processedCategories = new Set(sectionOrder.map(s => s.key));
+  const uncategorizedKPIs = [];
+  for (const category in sections) {
+    if (!processedCategories.has(category)) {
+      uncategorizedKPIs.push(...sections[category]);
+    }
+  }
 
-  if (efficiencyKPIs.length > 0) {
+  if (uncategorizedKPIs.length > 0) {
     form.addPageBreakItem()
-      .setTitle('Efficiency Metrics')
-      .setHelpText('These metrics measure how well you perform relative to your capacity.\n\n' +
-        'Leave blank if you don\'t know or track this metric.');
+      .setTitle('Other Metrics')
+      .setHelpText('Additional metrics for your assessment.');
 
-    for (const kpi of efficiencyKPIs) {
+    for (const kpi of uncategorizedKPIs) {
       createFormQuestion(form, kpi);
     }
   }
 
-  // ---- Section 4: Additional Information ----
+  // ---- Final Section: Additional Information ----
   form.addPageBreakItem()
     .setTitle('Additional Information')
     .setHelpText('Any other information you\'d like to share.');
@@ -194,6 +374,16 @@ function buildFormQuestions(form, inputKPIs) {
     .setTitle('Notes or Comments')
     .setRequired(false)
     .setHelpText('Anything else we should know about your business or this data?');
+}
+
+/**
+ * Build form questions from KPI config (Legacy - kept for backwards compatibility)
+ * @param {GoogleAppsScript.Forms.Form} form
+ * @param {Object[]} inputKPIs
+ */
+function buildFormQuestions(form, inputKPIs) {
+  // Use the new section-based builder
+  buildFormQuestionsBySection(form, inputKPIs);
 }
 
 /**

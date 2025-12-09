@@ -11,6 +11,7 @@
 
 /**
  * Load all KPI definitions from Config_KPIs sheet
+ * Supports new v2.0 columns: form_tier, tier_order, tool_category, etc.
  * @returns {Object[]} Array of KPI definition objects
  */
 function loadKPIConfig() {
@@ -18,21 +19,35 @@ function loadKPIConfig() {
   const data = sheetToObjects(sheet);
 
   return data
-    .filter(row => row.active === true || row.active === 'TRUE')
-    .map(row => ({
-      id: String(row.kpi_id || '').trim(),
-      name: String(row.name || '').trim(),
-      description: String(row.description || '').trim(),
-      category: String(row.category || '').toLowerCase().trim(),
-      type: String(row.type || '').toLowerCase().trim(),
-      dataType: String(row.data_type || 'number').toLowerCase().trim(),
-      formula: row.formula ? String(row.formula).trim() : null,
-      sections: parseSections(row.sections),
-      pillar: parseInt(row.pillar, 10) || 1,
-      required: row.required === true || row.required === 'TRUE',
-      formOrder: parseInt(row.form_order, 10) || 999,
-      active: true
-    }))
+    .filter(row => row.active === true || row.active === 'TRUE' || row.active === 1)
+    .map(row => {
+      // Normalize type to lowercase (handles 'calculated' vs 'Calculation')
+      const rawType = String(row.type || '').toLowerCase().trim();
+      const normalizedType = (rawType === 'calculation') ? 'calculated' : rawType;
+
+      return {
+        id: String(row.kpi_id || '').trim(),
+        name: String(row.name || '').trim(),
+        description: String(row.description || '').trim(),
+        category: String(row.category || '').trim(), // Keep original case for section names
+        type: normalizedType,
+        dataType: String(row.data_type || 'number').toLowerCase().trim(),
+        formula: row.formula ? String(row.formula).trim() : null,
+        sections: parseSections(row.sections),
+        pillar: parseInt(row.pillar, 10) || 1,
+        required: row.required === true || row.required === 'TRUE' || row.required === 1,
+        formOrder: parseInt(row.form_order, 10) || 999, // Deprecated - use tierOrder
+        active: true,
+        // New v2.0 columns
+        formTier: String(row.form_tier || '').toLowerCase().trim(),
+        tierOrder: parseInt(row.tier_order, 10) || 999,
+        tierReason: String(row.tier_reason || '').trim(),
+        toolCategory: String(row.tool_category || '').toLowerCase().trim(),
+        recommendedTool: String(row.recommended_tool || '').trim(),
+        toolNotes: String(row.tool_notes || '').trim(),
+        importance: String(row.importance || '').trim()
+      };
+    })
     .filter(kpi => kpi.id); // Filter out rows without ID
 }
 
@@ -138,17 +153,47 @@ function getDefaultBenchmarks() {
 
 /**
  * Get only input KPIs (for form generation)
- * @returns {Object[]} Array of input-type KPI definitions sorted by form_order
+ * @param {string} [tier] - Optional tier filter: "onboarding", "detailed", "section_deep", or null for all
+ * @returns {Object[]} Array of input-type KPI definitions sorted by tier_order
  */
-function getInputKPIs() {
+function getInputKPIs(tier = null) {
   const kpis = loadKPIConfig();
+  let inputKPIs = kpis.filter(kpi => kpi.type === 'input');
+
+  // Filter by tier if specified
+  if (tier) {
+    inputKPIs = inputKPIs.filter(kpi => kpi.formTier === tier.toLowerCase());
+  }
+
+  // Sort by tier_order (fall back to form_order for backwards compatibility)
+  return inputKPIs.sort((a, b) => {
+    const orderA = a.tierOrder !== 999 ? a.tierOrder : a.formOrder;
+    const orderB = b.tierOrder !== 999 ? b.tierOrder : b.formOrder;
+    return orderA - orderB;
+  });
+}
+
+/**
+ * Get input KPIs for multiple tiers combined
+ * @param {string[]} tiers - Array of tier names to include
+ * @returns {Object[]} Array of input-type KPI definitions sorted by tier_order
+ */
+function getInputKPIsForTiers(tiers) {
+  const kpis = loadKPIConfig();
+  const tierSet = new Set(tiers.map(t => t.toLowerCase()));
+
   return kpis
-    .filter(kpi => kpi.type === 'input')
-    .sort((a, b) => a.formOrder - b.formOrder);
+    .filter(kpi => kpi.type === 'input' && tierSet.has(kpi.formTier))
+    .sort((a, b) => {
+      const orderA = a.tierOrder !== 999 ? a.tierOrder : a.formOrder;
+      const orderB = b.tierOrder !== 999 ? b.tierOrder : b.formOrder;
+      return orderA - orderB;
+    });
 }
 
 /**
  * Get only calculated KPIs (for calculation engine)
+ * Type is already normalized in loadKPIConfig() (handles 'calculated' and 'Calculation')
  * @returns {Object[]} Array of calculated-type KPI definitions
  */
 function getCalculatedKPIs() {
