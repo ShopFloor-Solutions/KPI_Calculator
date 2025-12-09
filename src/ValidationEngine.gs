@@ -144,7 +144,13 @@ function runValidation(rule, values, kpiConfig) {
  * Execute RECONCILE validation
  * Check if calculated value matches reported value
  * Format: RECONCILE:expression:target
- * Example: RECONCILE:total_leads*booking_rate/100:in_home_visits
+ *
+ * Supported expression operators: +, -, *, /
+ * Examples:
+ *   RECONCILE:total_leads*booking_rate/100:in_home_visits
+ *   RECONCILE:CSR_CORE_003+CSR_CORE_004:CSR_CORE_001  (addition)
+ *   RECONCILE:SAL_CORE_003*SAL_DER_002:SAL_CORE_004  (multiplication)
+ *
  * @param {string} formula
  * @param {Object} values
  * @param {number} tolerance
@@ -161,7 +167,7 @@ function executeReconcile(formula, values, tolerance) {
   const expression = parts[1];
   const targetId = parts[2];
 
-  // Evaluate expression
+  // Evaluate expression (supports +, -, *, / operators)
   const expected = evaluateExpression(expression, values);
   const actual = values[targetId];
 
@@ -188,6 +194,9 @@ function executeReconcile(formula, values, tolerance) {
  * Execute RANGE validation
  * Check if value is within acceptable bounds
  * Format: RANGE:kpi_id:min:max
+ *
+ * Supports negative values for min/max (e.g., RANGE:net_margin:-50:50)
+ *
  * @param {string} formula
  * @param {Object} values
  * @returns {Object} {passed: boolean, actual, min, max}
@@ -204,20 +213,35 @@ function executeRange(formula, values) {
   const max = parseFloat(parts[3]);
   const actual = values[kpiId];
 
+  // Validate min/max are valid numbers
+  if (isNaN(min) || isNaN(max)) {
+    log(`Invalid RANGE bounds: min=${parts[2]}, max=${parts[3]}`);
+    return { passed: true };
+  }
+
   // If value is missing, skip validation
   if (isEmpty(actual)) {
     return { passed: true };
   }
 
-  const passed = actual >= min && actual <= max;
+  const numericActual = parseFloat(actual);
+  if (isNaN(numericActual)) {
+    return { passed: true };
+  }
+
+  const passed = numericActual >= min && numericActual <= max;
+
+  // Format expected string to show negative signs clearly
+  const minStr = min < 0 ? `(${min})` : String(min);
+  const maxStr = max < 0 ? `(${max})` : String(max);
 
   return {
     passed: passed,
-    actual: actual,
-    expected: `${min} - ${max}`,
+    actual: numericActual,
+    expected: `${minStr} to ${maxStr}`,
     min: min,
     max: max,
-    variance: passed ? 0 : (actual < min ? min - actual : actual - max)
+    variance: passed ? 0 : (numericActual < min ? min - numericActual : numericActual - max)
   };
 }
 
