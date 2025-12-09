@@ -354,22 +354,81 @@ function mapFormDataToClient(headers, data, mapping) {
 
 /**
  * Write client record to Clients sheet
+ * Auto-adds missing columns if they exist in Config_KPIs
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
- * @param {Object} record - Client record
+ * @param {Object} record - Client record with KPI IDs as keys
  */
 function writeClientRecord(sheet, record) {
-  // Get headers from Clients sheet
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const headersLower = headers.map(h => String(h).toLowerCase());
+  // Get current headers
+  let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  let headersLower = headers.map(h => String(h).toLowerCase());
 
-  // Build row data matching header order
-  const rowData = [];
-  for (const header of headersLower) {
-    const value = record[header];
-    rowData.push(value !== undefined ? value : '');
+  // Find keys in record that aren't in headers
+  const recordKeys = Object.keys(record);
+  const missingKeys = recordKeys.filter(key =>
+    !headersLower.includes(key.toLowerCase()) &&
+    key !== '' &&
+    record[key] !== undefined &&
+    record[key] !== null &&
+    record[key] !== ''
+  );
+
+  // Auto-add missing columns if they're valid KPI IDs or standard fields
+  if (missingKeys.length > 0) {
+    const kpiConfig = loadKPIConfig();
+    const validKPIIds = new Set(kpiConfig.map(k => k.id.toLowerCase()));
+
+    // Standard field names that are always valid
+    const standardFields = new Set([
+      'client_id', 'timestamp', 'company_name', 'contact_email',
+      'industry', 'state', 'data_period', 'period_days',
+      'analysis_status', 'last_analyzed', 'notes'
+    ]);
+
+    const columnsToAdd = missingKeys.filter(key =>
+      validKPIIds.has(key.toLowerCase()) || standardFields.has(key.toLowerCase())
+    );
+
+    if (columnsToAdd.length > 0) {
+      // Add new columns at the end
+      const lastCol = sheet.getLastColumn();
+      for (let i = 0; i < columnsToAdd.length; i++) {
+        sheet.getRange(1, lastCol + 1 + i).setValue(columnsToAdd[i]);
+      }
+      log(`Auto-added ${columnsToAdd.length} columns to Clients sheet: ${columnsToAdd.join(', ')}`);
+
+      // Refresh headers after adding columns
+      headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      headersLower = headers.map(h => String(h).toLowerCase());
+    }
+
+    // Log any keys that couldn't be mapped
+    const unmappedKeys = missingKeys.filter(key =>
+      !validKPIIds.has(key.toLowerCase()) && !standardFields.has(key.toLowerCase())
+    );
+    if (unmappedKeys.length > 0) {
+      log(`WARNING: Could not map these fields (not in Config_KPIs): ${unmappedKeys.join(', ')}`);
+    }
   }
 
-  // Append row
+  // Build row data matching header order (case-insensitive matching)
+  const rowData = [];
+  for (let i = 0; i < headers.length; i++) {
+    const header = String(headers[i]).toLowerCase();
+
+    // Find matching key in record (case-insensitive)
+    let value = null;
+    for (const key of recordKeys) {
+      if (key.toLowerCase() === header) {
+        value = record[key];
+        break;
+      }
+    }
+
+    rowData.push(value !== null && value !== undefined ? value : '');
+  }
+
+  // Append the row
   const newRow = sheet.getLastRow() + 1;
   sheet.getRange(newRow, 1, 1, rowData.length).setValues([rowData]);
 }
@@ -522,4 +581,160 @@ function getClientSummary(clientId) {
     inputsProvided: inputCount,
     totalInputs: totalInputs
   };
+}
+
+// ============================================================================
+// SCHEMA SYNCHRONIZATION
+// ============================================================================
+
+/**
+ * Synchronize Clients sheet columns with Config_KPIs input definitions
+ * Adds missing columns, preserves existing data
+ * @returns {Object} {added: number, columns: string[]}
+ */
+function syncClientsSchema() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let clientsSheet = ss.getSheetByName(SHEET_NAMES.CLIENTS);
+
+  // Create Clients sheet if it doesn't exist
+  if (!clientsSheet) {
+    clientsSheet = ss.insertSheet(SHEET_NAMES.CLIENTS);
+    log('Created Clients sheet');
+  }
+
+  // Get KPI configuration
+  const kpiConfig = loadKPIConfig();
+  const inputKPIs = kpiConfig.filter(k => k.type === 'input');
+
+  // Define required system columns (always first)
+  const systemColumns = [
+    'client_id', 'timestamp', 'company_name', 'contact_email',
+    'industry', 'state', 'data_period', 'period_days'
+  ];
+
+  // Get all input KPI IDs
+  const kpiColumns = inputKPIs.map(k => k.id);
+
+  // Define required trailing columns
+  const trailingColumns = ['analysis_status', 'last_analyzed', 'notes'];
+
+  // Build complete column list
+  const requiredColumns = [...systemColumns, ...kpiColumns, ...trailingColumns];
+
+  // Get current headers (handle empty sheet)
+  let currentHeaders = [];
+  if (clientsSheet.getLastColumn() > 0) {
+    currentHeaders = clientsSheet.getRange(1, 1, 1, clientsSheet.getLastColumn()).getValues()[0];
+  }
+  const currentHeaderSet = new Set(currentHeaders.map(h => String(h).toLowerCase()));
+
+  // Find missing columns
+  const missingColumns = requiredColumns.filter(col =>
+    !currentHeaderSet.has(col.toLowerCase())
+  );
+
+  if (missingColumns.length === 0) {
+    log('Clients schema is up to date - no columns added');
+    return { added: 0, columns: [] };
+  }
+
+  // Add missing columns at the end
+  const lastCol = clientsSheet.getLastColumn() || 0;
+
+  for (let i = 0; i < missingColumns.length; i++) {
+    clientsSheet.getRange(1, lastCol + 1 + i).setValue(missingColumns[i]);
+  }
+
+  // Format header row if this is a new sheet
+  if (lastCol === 0) {
+    const headerRange = clientsSheet.getRange(1, 1, 1, missingColumns.length);
+    headerRange.setFontWeight('bold')
+      .setBackground('#4285f4')
+      .setFontColor('#ffffff');
+    clientsSheet.setFrozenRows(1);
+  }
+
+  log(`Added ${missingColumns.length} columns to Clients sheet: ${missingColumns.join(', ')}`);
+
+  return {
+    added: missingColumns.length,
+    columns: missingColumns
+  };
+}
+
+/**
+ * Menu handler for schema sync with confirmation
+ */
+function syncClientsSchemaWithConfirmation() {
+  const ui = SpreadsheetApp.getUi();
+  const result = ui.alert(
+    'Sync Clients Schema',
+    'This will add any missing KPI columns to the Clients sheet based on Config_KPIs.\n\n' +
+    'Existing data will NOT be affected.\n\nContinue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (result === ui.Button.YES) {
+    try {
+      const syncResult = syncClientsSchema();
+
+      if (syncResult.added > 0) {
+        ui.alert(
+          'Schema Sync Complete',
+          `Added ${syncResult.added} new columns:\n\n${syncResult.columns.join('\n')}`,
+          ui.ButtonSet.OK
+        );
+      } else {
+        ui.alert(
+          'Schema Sync Complete',
+          'Clients sheet is already up to date. No columns needed to be added.',
+          ui.ButtonSet.OK
+        );
+      }
+    } catch (error) {
+      logError('Error syncing schema', error);
+      ui.alert('Error', 'Failed to sync schema: ' + error.message, ui.ButtonSet.OK);
+    }
+  }
+}
+
+/**
+ * Validate that all KPI IDs in validation rules exist in Config_KPIs
+ * @returns {Object[]} Array of issues found
+ */
+function validateRuleKPIReferences() {
+  const kpiConfig = loadKPIConfig();
+  const validIds = new Set(kpiConfig.map(k => k.id.toLowerCase()));
+
+  const validationConfig = loadValidationConfig();
+  const issues = [];
+
+  for (const rule of validationConfig) {
+    if (!rule.affectedKPIs || rule.affectedKPIs.length === 0) continue;
+
+    // affectedKPIs can be a string or array
+    const kpiIds = Array.isArray(rule.affectedKPIs)
+      ? rule.affectedKPIs
+      : rule.affectedKPIs.split(',').map(id => id.trim());
+
+    for (const kpiId of kpiIds) {
+      const kpiIdLower = kpiId.toLowerCase();
+      if (kpiIdLower && !validIds.has(kpiIdLower)) {
+        issues.push({
+          ruleId: rule.id,
+          ruleName: rule.name,
+          invalidKPI: kpiId
+        });
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    log('WARNING: Validation rules reference invalid KPI IDs:');
+    issues.forEach(i => log(`  Rule ${i.ruleId}: unknown KPI "${i.invalidKPI}"`));
+  } else {
+    log('All validation rule KPI references are valid');
+  }
+
+  return issues;
 }

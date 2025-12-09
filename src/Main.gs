@@ -47,6 +47,8 @@ function createMenu() {
     .addSeparator()
     .addSubMenu(ui.createMenu('Administration')
       .addItem('Validate Configuration', 'validateAndShowConfig')
+      .addItem('Sync Clients Schema with KPIs', 'syncClientsSchemaWithConfirmation')
+      .addSeparator()
       .addItem('View Settings', 'showSettings'))
     .addSeparator()
     .addSubMenu(ui.createMenu('Help')
