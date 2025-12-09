@@ -100,7 +100,8 @@ function generateResults(clientId, clientData, allValues, validationResult, insi
     tierKPIs,  // Use tier-filtered KPIs
     sectionConfig,
     validationResult.issues,
-    benchmarks  // Pass benchmarks for rating
+    benchmarks,  // Pass benchmarks for rating
+    clientData   // Pass clientData for period adjustment
   );
   currentRow += 1; // Blank row
 
@@ -114,7 +115,8 @@ function generateResults(clientId, clientData, allValues, validationResult, insi
     tierKPIs,  // Use tier-filtered KPIs
     sectionConfig,
     validationResult.issues,
-    benchmarks  // Pass benchmarks for rating
+    benchmarks,  // Pass benchmarks for rating
+    clientData   // Pass clientData for period adjustment
   );
   currentRow += 1; // Blank row
 
@@ -271,9 +273,10 @@ function writeResultsHeader(sheet, startRow, clientData, overallStatus) {
  * @param {Object[]} sectionConfig
  * @param {Object[]} validationIssues
  * @param {Object} benchmarks - Benchmarks keyed by kpiId (from loadBenchmarksForResults)
+ * @param {Object} clientData - Client data object (for period adjustment)
  * @returns {number} Next row number
  */
-function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpiConfig, sectionConfig, validationIssues, benchmarks) {
+function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpiConfig, sectionConfig, validationIssues, benchmarks, clientData) {
   let row = startRow;
   const colSpan = 8;  // Updated for 8 columns
 
@@ -316,7 +319,10 @@ function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpi
     const notes = getKPINotes(kpi.id, value, validationIssues);
 
     // Get benchmark rating using the new BenchmarkEngine functions
-    const benchmark = benchmarks ? benchmarks[kpi.id] : null;
+    // Adjust benchmark thresholds for user's data period (monthly/quarterly/annual)
+    const rawBenchmark = benchmarks ? benchmarks[kpi.id] : null;
+    const userPeriod = clientData?.dataPeriod || 'annual';
+    const benchmark = adjustBenchmarkForPeriod(rawBenchmark, userPeriod);
     const ratingDisplay = getRatingDisplay(value, benchmark, benchmark?.direction || 'higher');
 
     const rowData = [

@@ -1,8 +1,8 @@
 # KPI Analyzer — Benchmark System Specification
 
-**Date**: December 9, 2024  
-**Priority**: HIGH  
-**Prepared by**: Claude (AI Assistant)  
+**Date**: December 9, 2024
+**Priority**: HIGH
+**Prepared by**: Claude (AI Assistant)
 **For**: Lead Developer
 
 ---
@@ -137,7 +137,7 @@ const RATING_LEVELS = {
 
 /**
  * Get performance rating for a value against benchmark thresholds
- * 
+ *
  * @param {number} value - The KPI value to rate
  * @param {Object} benchmark - Benchmark object with poor/average/good/excellent thresholds
  * @param {string} [direction='higher'] - 'higher' = higher is better, 'lower' = lower is better
@@ -147,19 +147,19 @@ function getRating(value, benchmark, direction = 'higher') {
   if (value === null || value === undefined || isNaN(value)) {
     return null;  // Can't rate missing values
   }
-  
+
   if (!benchmark) {
     return null;  // No benchmark defined for this KPI
   }
-  
+
   const { poor, average, good, excellent } = benchmark;
-  
+
   // Validate benchmark thresholds exist
-  if (poor === undefined || average === undefined || 
+  if (poor === undefined || average === undefined ||
       good === undefined || excellent === undefined) {
     return null;
   }
-  
+
   if (direction === 'lower') {
     // Lower is better: excellent < good < average < poor
     // Thresholds are in DESCENDING order (poor=15, avg=10, good=5, excellent=2)
@@ -181,7 +181,7 @@ function getRating(value, benchmark, direction = 'higher') {
 
 /**
  * Get rating with color and display info
- * 
+ *
  * @param {number} value - The KPI value
  * @param {Object} benchmark - Benchmark thresholds
  * @param {string} direction - 'higher' or 'lower'
@@ -189,7 +189,7 @@ function getRating(value, benchmark, direction = 'higher') {
  */
 function getRatingDisplay(value, benchmark, direction = 'higher') {
   const rating = getRating(value, benchmark, direction);
-  
+
   if (!rating) {
     return {
       rating: null,
@@ -199,7 +199,7 @@ function getRatingDisplay(value, benchmark, direction = 'higher') {
       comparison: 'No benchmark'
     };
   }
-  
+
   // Define colors for each rating
   const ratingConfig = {
     critical: {
@@ -233,9 +233,9 @@ function getRatingDisplay(value, benchmark, direction = 'higher') {
       label: 'Excellent'
     }
   };
-  
+
   const config = ratingConfig[rating];
-  
+
   // Build comparison string
   let comparison = '';
   if (direction === 'lower') {
@@ -243,7 +243,7 @@ function getRatingDisplay(value, benchmark, direction = 'higher') {
   } else {
     comparison = `≥${benchmark.good} is good`;
   }
-  
+
   return {
     rating: rating,
     label: config.label,
@@ -443,7 +443,7 @@ Add `getRating()` and `getRatingDisplay()` functions (see Section 2).
 ```javascript
 const COLORS = {
   // ... existing colors ...
-  
+
   // Benchmark rating colors
   RATING_CRITICAL_BG: '#ffcdd2',
   RATING_CRITICAL_TEXT: '#b71c1c',
@@ -516,7 +516,7 @@ function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpi
     const status = getKPIStatus(kpi.id, value, validationIssues);
     const sectionNames = getSectionNamesForKPI(kpi, sectionConfig);
     const notes = getKPINotes(kpi.id, value, validationIssues);
-    
+
     // Get benchmark rating - NEW
     const benchmark = benchmarks[kpi.id] || null;
     const ratingDisplay = getRatingDisplay(value, benchmark, benchmark?.direction || 'higher');
@@ -560,7 +560,7 @@ function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpi
         .setFontColor(COLORS.RATING_NONE_TEXT)
         .setHorizontalAlignment('center');
     }
-    
+
     // vs Benchmark column formatting (col 6) - gray italic
     sheet.getRange(row, 6)
       .setFontColor('#9e9e9e')
@@ -593,7 +593,7 @@ function generateResults(clientId, clientData, allValues, validationResult, insi
   // Load benchmarks for this client's industry/state - NEW
   const benchmarks = loadBenchmarksForResults(clientData.industry, clientData.state);
 
-  // ... 
+  // ...
 
   // Volume metrics section - UPDATED to pass benchmarks
   currentRow = writeKPISection(
@@ -621,7 +621,7 @@ function generateResults(clientId, clientData, allValues, validationResult, insi
 function loadBenchmarksForResults(industry, state) {
   const benchmarkList = loadBenchmarkConfig(industry, state);
   const benchmarks = {};
-  
+
   for (const b of benchmarkList) {
     // Use first match for each KPI (priority matching already done)
     if (!benchmarks[b.kpiId]) {
@@ -634,7 +634,7 @@ function loadBenchmarksForResults(industry, state) {
       };
     }
   }
-  
+
   return benchmarks;
 }
 ```
@@ -682,15 +682,15 @@ function initializeBenchmarkConfig() {
     ['close_rate', 'all', 'all', 20, 35, 50, 65, 'higher', 'Percentage of appointments that become sales'],
     ['profit_margin', 'all', 'all', 5, 12, 20, 30, 'higher', 'Net profit as percentage of revenue'],
     ['schedule_efficiency', 'all', 'all', 60, 80, 95, 100, 'higher', 'Utilization of available capacity'],
-    
+
     // Inverse KPIs (lower is better)
     ['rework_rate', 'all', 'all', 15, 10, 5, 2, 'lower', 'Percentage of jobs requiring callback'],
     ['cost_per_lead', 'all', 'all', 200, 150, 100, 50, 'lower', 'Marketing cost per lead'],
-    
+
     // Industry-specific examples
     ['close_rate', 'hvac', 'all', 25, 40, 55, 70, 'higher', 'HVAC typically has higher close rates'],
     ['close_rate', 'roofing', 'all', 30, 45, 60, 75, 'higher', 'Roofing urgency drives higher closes'],
-    
+
     // State-specific examples
     ['profit_margin', 'all', 'california', 8, 15, 23, 33, 'higher', 'Higher COL requires higher margins'],
     ['profit_margin', 'all', 'ontario', 7, 14, 21, 30, 'higher', 'Ontario market benchmarks']
@@ -811,4 +811,309 @@ Client: industry=hvac, state=california
 
 ---
 
-*End of Benchmark System Specification*
+
+# Benchmark Period Adjustment Feature
+
+**Date**: December 9, 2024
+**Priority**: HIGH
+**Assigned To**: Junior Developer
+**Estimated Time**: 2-3 hours
+
+---
+
+## Background Context
+
+### What This System Does
+The KPI Analyzer collects business data from trade companies (HVAC, plumbing, roofing, electrical) via a Google Form, calculates performance metrics, and compares them against industry benchmarks to generate a diagnostic report.
+
+### The Data Flow
+```
+User fills form → Data saved to Clients sheet → System calculates KPIs →
+System compares KPIs to benchmarks → Results sheet shows ratings (Poor/Average/Good/Excellent)
+```
+
+### Key Sheets Involved
+- **Config_Benchmarks**: Stores benchmark thresholds for each KPI
+- **Clients**: Stores user-submitted data (includes `data_period` field: monthly/quarterly/annual)
+- **BenchmarkEngine.gs**: Contains `getRating()` and `getBenchmarkForKPI()` functions
+
+---
+
+## The Problem
+
+Users can submit data for different time periods (monthly, quarterly, or annual). Some KPIs are **time-sensitive** — their benchmark values assume annual figures.
+
+**Example Problem:**
+- Benchmark says "Good revenue per tech = $300,000+"
+- This benchmark assumes **annual** revenue
+- User submits **quarterly** data: $85,000/quarter
+- System incorrectly rates this as "Poor" (because 85K < 300K)
+- But $85K/quarter = $340K/year, which is actually "Good"
+
+---
+
+## The Solution
+
+**Adjust the benchmark thresholds DOWN to match the user's reporting period.**
+
+Instead of:
+- ❌ Multiplying user's $85K × 4 = $340K (inflates seasonal data)
+
+We do:
+- ✅ Dividing benchmark $300K ÷ 4 = $75K quarterly threshold
+- ✅ Compare user's actual $85K against $75K
+- ✅ Result: "Good" (85K > 75K)
+
+---
+
+## Which KPIs Need This?
+
+Most KPIs are **ratios or percentages** — they're the same regardless of time period. Only 3 KPIs need period adjustment:
+
+| kpi_id | Why It Needs Adjustment |
+|--------|-------------------------|
+| `revenue_per_tech` | Benchmark is annual revenue per technician |
+| `jobs_per_tech` | Benchmark is annual jobs per technician |
+| `employee_turnover` | Benchmark is annual turnover rate |
+
+All other KPIs (booking_rate, close_rate, profit_margin, rework_rate, cost_per_lead, average_ticket, etc.) are percentages or per-unit values — **no adjustment needed**.
+
+---
+
+## Implementation Steps
+
+### Step 1: Add Column to Config_Benchmarks Sheet
+
+Add a new column `benchmark_period` after the `direction` column.
+
+**New column values:**
+- `annual` — for time-sensitive KPIs (revenue_per_tech, jobs_per_tech, employee_turnover)
+- `agnostic` — for all other KPIs (or leave blank, treat blank as agnostic)
+
+**Updated header row:**
+```
+kpi_id | industry | state | poor | average | good | excellent | direction | benchmark_period | notes
+```
+
+**Update these rows in Config_Benchmarks:**
+
+| kpi_id | benchmark_period |
+|--------|------------------|
+| revenue_per_tech | annual |
+| jobs_per_tech | annual |
+| employee_turnover | annual |
+| (all others) | agnostic |
+
+---
+
+### Step 2: Add Helper Function to BenchmarkEngine.gs
+
+Add this function to `BenchmarkEngine.gs`:
+
+```javascript
+/**
+ * Get the divisor for converting annual benchmarks to user's period
+ * @param {string} userPeriod - User's data period ('monthly', 'quarterly', 'annual')
+ * @returns {number} Divisor to apply to annual benchmarks
+ */
+function getPeriodDivisor(userPeriod) {
+  if (!userPeriod) return 1;
+
+  switch (userPeriod.toLowerCase().trim()) {
+    case 'monthly':
+      return 12;
+    case 'quarterly':
+      return 4;
+    case 'annual':
+    case 'annually':
+      return 1;
+    default:
+      return 1;
+  }
+}
+
+/**
+ * Adjust benchmark thresholds based on user's reporting period
+ * Only applies to time-sensitive KPIs (benchmark_period = 'annual')
+ *
+ * @param {Object} benchmark - Benchmark object with poor/average/good/excellent thresholds
+ * @param {string} userPeriod - User's data period from form ('monthly', 'quarterly', 'annual')
+ * @returns {Object} Adjusted benchmark object
+ */
+function adjustBenchmarkForPeriod(benchmark, userPeriod) {
+  // If no benchmark or no period info, return as-is
+  if (!benchmark || !userPeriod) {
+    return benchmark;
+  }
+
+  // Only adjust if benchmark is explicitly marked as 'annual'
+  const benchmarkPeriod = (benchmark.benchmarkPeriod || 'agnostic').toLowerCase().trim();
+
+  if (benchmarkPeriod !== 'annual') {
+    // Ratios and percentages don't need adjustment
+    return benchmark;
+  }
+
+  // Get divisor based on user's period
+  const divisor = getPeriodDivisor(userPeriod);
+
+  // If user submitted annual data, no adjustment needed
+  if (divisor === 1) {
+    return benchmark;
+  }
+
+  // Divide all thresholds by the period divisor
+  return {
+    poor: benchmark.poor / divisor,
+    average: benchmark.average / divisor,
+    good: benchmark.good / divisor,
+    excellent: benchmark.excellent / divisor,
+    direction: benchmark.direction,
+    benchmarkPeriod: benchmark.benchmarkPeriod
+  };
+}
+```
+
+---
+
+### Step 3: Update loadBenchmarkConfig() in Config.gs
+
+Find the `loadBenchmarkConfig()` function and add `benchmarkPeriod` to the mapping:
+
+```javascript
+// Find this line in the map() function:
+direction: String(row.direction || 'higher').toLowerCase().trim(),
+
+// Add this line immediately after it:
+benchmarkPeriod: String(row.benchmark_period || 'agnostic').toLowerCase().trim(),
+```
+
+**Full context — the mapping should look like:**
+```javascript
+let benchmarks = data.map(row => ({
+  kpiId: String(row.kpi_id || '').trim(),
+  industry: String(row.industry || 'all').toLowerCase().trim(),
+  state: String(row.state || 'all').toLowerCase().trim(),
+  poor: parseFloat(row.poor),
+  average: parseFloat(row.average),
+  good: parseFloat(row.good),
+  excellent: parseFloat(row.excellent),
+  direction: String(row.direction || 'higher').toLowerCase().trim(),
+  benchmarkPeriod: String(row.benchmark_period || 'agnostic').toLowerCase().trim(),  // ADD THIS LINE
+  notes: String(row.notes || '').trim()
+}));
+```
+
+---
+
+### Step 4: Apply Adjustment When Getting Ratings
+
+Find where `getRating()` or `getRatingDisplay()` is called. This is likely in:
+- `ResultsGenerator.gs` (in `writeKPISection()`)
+- `InsightsEngine.gs` (in `generateInsights()`)
+
+**Before the rating call, adjust the benchmark:**
+
+```javascript
+// Get user's data period from clientData
+const userPeriod = clientData.dataPeriod || 'annual';
+
+// Get the benchmark for this KPI
+const benchmark = benchmarks[kpi.id] || null;
+
+// Adjust benchmark thresholds if needed
+const adjustedBenchmark = adjustBenchmarkForPeriod(benchmark, userPeriod);
+
+// Now get the rating using the adjusted benchmark
+const ratingDisplay = getRatingDisplay(value, adjustedBenchmark, adjustedBenchmark?.direction || 'higher');
+```
+
+---
+
+### Step 5: Update "vs Benchmark" Display Text
+
+The Results sheet shows a column like "≥$300K is good". This should reflect the adjusted threshold.
+
+In `getRatingDisplay()` or wherever the comparison text is built, use the **adjusted** threshold:
+
+```javascript
+// Build comparison string using adjusted values
+let comparison = '';
+if (direction === 'lower') {
+  comparison = `≤${formatValue(adjustedBenchmark.good, dataType)} is good`;
+} else {
+  comparison = `≥${formatValue(adjustedBenchmark.good, dataType)} is good`;
+}
+```
+
+**Example output:**
+- Annual user: "≥$300,000 is good"
+- Quarterly user: "≥$75,000 is good"
+- Monthly user: "≥$25,000 is good"
+
+---
+
+## Testing Checklist
+
+### Test 1: Verify Agnostic KPIs Unchanged
+- [ ] Submit form with `data_period = quarterly`
+- [ ] Check `close_rate` benchmark thresholds are NOT divided
+- [ ] Rating should use original thresholds (poor=20, avg=35, good=50, excellent=65)
+
+### Test 2: Verify Annual KPIs Adjusted for Quarterly
+- [ ] Submit form with `data_period = quarterly`
+- [ ] Check `revenue_per_tech` benchmark thresholds ARE divided by 4
+- [ ] Original: poor=150K, avg=225K, good=300K, excellent=400K
+- [ ] Adjusted: poor=37.5K, avg=56.25K, good=75K, excellent=100K
+- [ ] User value of $80K should rate as "Good" (80K > 75K)
+
+### Test 3: Verify Annual KPIs Adjusted for Monthly
+- [ ] Submit form with `data_period = monthly`
+- [ ] Check `revenue_per_tech` thresholds divided by 12
+- [ ] Adjusted: poor=12.5K, avg=18.75K, good=25K, excellent=33.3K
+- [ ] User value of $28K should rate as "Good" (28K > 25K)
+
+### Test 4: Verify Annual KPIs Unchanged for Annual
+- [ ] Submit form with `data_period = annual`
+- [ ] Check `revenue_per_tech` thresholds NOT divided
+- [ ] Should use original thresholds
+
+### Test 5: Verify "vs Benchmark" Text Updates
+- [ ] For quarterly user, column should show "≥$75,000 is good" (not $300,000)
+- [ ] For monthly user, column should show "≥$25,000 is good"
+
+---
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| **Config_Benchmarks** (sheet) | Add `benchmark_period` column |
+| **Config.gs** | Add `benchmarkPeriod` to `loadBenchmarkConfig()` mapping |
+| **BenchmarkEngine.gs** | Add `getPeriodDivisor()` and `adjustBenchmarkForPeriod()` functions |
+| **ResultsGenerator.gs** | Call `adjustBenchmarkForPeriod()` before rating comparison |
+
+---
+
+## Quick Reference: Period Divisors
+
+| User's data_period | Divisor |
+|--------------------|---------|
+| monthly | 12 |
+| quarterly | 4 |
+| annual | 1 (no change) |
+
+---
+
+## Questions?
+
+If anything is unclear, check:
+1. The `data_period` field in the Clients sheet for a sample client
+2. The existing `getRating()` function in BenchmarkEngine.gs for how ratings work
+3. The Config_Benchmarks sheet structure
+
+Or reach out to the lead developer for clarification.
+
+---
+
+*End of Specification*

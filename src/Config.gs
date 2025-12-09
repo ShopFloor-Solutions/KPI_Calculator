@@ -114,6 +114,7 @@ function loadBenchmarkConfig(industry, state) {
       good: parseFloat(row.good),
       excellent: parseFloat(row.excellent),
       direction: String(row.direction || 'higher').toLowerCase().trim(),
+      benchmarkPeriod: String(row.benchmark_period || 'agnostic').toLowerCase().trim(),
       notes: String(row.notes || '').trim()
     })).filter(b => b.kpiId && !isNaN(b.poor));
 
@@ -144,14 +145,18 @@ function loadBenchmarkConfig(industry, state) {
  */
 function getDefaultBenchmarks() {
   return [
-    // Standard KPIs (higher is better)
-    { kpiId: 'booking_rate', industry: 'all', state: 'all', poor: 30, average: 50, good: 70, excellent: 85, direction: 'higher' },
-    { kpiId: 'close_rate', industry: 'all', state: 'all', poor: 20, average: 35, good: 50, excellent: 65, direction: 'higher' },
-    { kpiId: 'profit_margin', industry: 'all', state: 'all', poor: 5, average: 12, good: 20, excellent: 30, direction: 'higher' },
-    { kpiId: 'schedule_efficiency', industry: 'all', state: 'all', poor: 60, average: 80, good: 95, excellent: 100, direction: 'higher' },
+    // Standard KPIs (higher is better) - agnostic = same regardless of period
+    { kpiId: 'booking_rate', industry: 'all', state: 'all', poor: 30, average: 50, good: 70, excellent: 85, direction: 'higher', benchmarkPeriod: 'agnostic' },
+    { kpiId: 'close_rate', industry: 'all', state: 'all', poor: 20, average: 35, good: 50, excellent: 65, direction: 'higher', benchmarkPeriod: 'agnostic' },
+    { kpiId: 'profit_margin', industry: 'all', state: 'all', poor: 5, average: 12, good: 20, excellent: 30, direction: 'higher', benchmarkPeriod: 'agnostic' },
+    { kpiId: 'schedule_efficiency', industry: 'all', state: 'all', poor: 60, average: 80, good: 95, excellent: 100, direction: 'higher', benchmarkPeriod: 'agnostic' },
     // Inverse KPIs (lower is better)
-    { kpiId: 'rework_rate', industry: 'all', state: 'all', poor: 15, average: 10, good: 5, excellent: 2, direction: 'lower' },
-    { kpiId: 'cost_per_lead', industry: 'all', state: 'all', poor: 200, average: 150, good: 100, excellent: 50, direction: 'lower' }
+    { kpiId: 'rework_rate', industry: 'all', state: 'all', poor: 15, average: 10, good: 5, excellent: 2, direction: 'lower', benchmarkPeriod: 'agnostic' },
+    { kpiId: 'cost_per_lead', industry: 'all', state: 'all', poor: 200, average: 150, good: 100, excellent: 50, direction: 'lower', benchmarkPeriod: 'agnostic' },
+    // Time-sensitive KPIs (annual benchmarks - need period adjustment)
+    { kpiId: 'revenue_per_tech', industry: 'all', state: 'all', poor: 150000, average: 225000, good: 300000, excellent: 400000, direction: 'higher', benchmarkPeriod: 'annual' },
+    { kpiId: 'jobs_per_tech', industry: 'all', state: 'all', poor: 40, average: 60, good: 80, excellent: 100, direction: 'higher', benchmarkPeriod: 'annual' },
+    { kpiId: 'employee_turnover', industry: 'all', state: 'all', poor: 50, average: 30, good: 20, excellent: 10, direction: 'lower', benchmarkPeriod: 'annual' }
   ];
 }
 

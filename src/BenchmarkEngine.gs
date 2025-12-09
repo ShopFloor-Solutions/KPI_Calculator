@@ -21,6 +21,79 @@ const RATING_LEVELS = {
 };
 
 // ============================================================================
+// BENCHMARK PERIOD ADJUSTMENT
+// ============================================================================
+
+/**
+ * Get the divisor for converting annual benchmarks to user's period
+ * @param {string} userPeriod - User's data period ('monthly', 'quarterly', 'annual')
+ * @returns {number} Divisor to apply to annual benchmarks
+ */
+function getPeriodDivisor(userPeriod) {
+  if (!userPeriod) return 1;
+
+  switch (userPeriod.toLowerCase().trim()) {
+    case 'monthly':
+      return 12;
+    case 'quarterly':
+      return 4;
+    case 'annual':
+    case 'annually':
+      return 1;
+    default:
+      return 1;
+  }
+}
+
+/**
+ * Adjust benchmark thresholds based on user's reporting period
+ * Only applies to time-sensitive KPIs (benchmark_period = 'annual')
+ *
+ * Example: User submits quarterly data ($85K revenue/tech)
+ * - Benchmark says "Good = $300K" (annual)
+ * - We divide: $300K / 4 = $75K quarterly threshold
+ * - Compare: $85K > $75K = "Good"
+ *
+ * @param {Object} benchmark - Benchmark object with poor/average/good/excellent thresholds
+ * @param {string} userPeriod - User's data period from form ('monthly', 'quarterly', 'annual')
+ * @returns {Object} Adjusted benchmark object (or original if no adjustment needed)
+ */
+function adjustBenchmarkForPeriod(benchmark, userPeriod) {
+  // If no benchmark or no period info, return as-is
+  if (!benchmark || !userPeriod) {
+    return benchmark;
+  }
+
+  // Only adjust if benchmark is explicitly marked as 'annual'
+  const benchmarkPeriod = (benchmark.benchmarkPeriod || 'agnostic').toLowerCase().trim();
+
+  if (benchmarkPeriod !== 'annual') {
+    // Ratios and percentages don't need adjustment
+    return benchmark;
+  }
+
+  // Get divisor based on user's period
+  const divisor = getPeriodDivisor(userPeriod);
+
+  // If user submitted annual data, no adjustment needed
+  if (divisor === 1) {
+    return benchmark;
+  }
+
+  // Divide all thresholds by the period divisor
+  return {
+    poor: benchmark.poor / divisor,
+    average: benchmark.average / divisor,
+    good: benchmark.good / divisor,
+    excellent: benchmark.excellent / divisor,
+    direction: benchmark.direction,
+    benchmarkPeriod: benchmark.benchmarkPeriod,
+    // Preserve other properties
+    matchType: benchmark.matchType
+  };
+}
+
+// ============================================================================
 // RATING LOGIC
 // ============================================================================
 
@@ -199,6 +272,7 @@ function loadBenchmarksForResults(industry, state) {
         good: b.good,
         excellent: b.excellent,
         direction: b.direction || 'higher',
+        benchmarkPeriod: b.benchmarkPeriod || 'agnostic',
         matchType: getMatchType(b, industryLower, stateLower)
       };
     } else {
@@ -216,6 +290,7 @@ function loadBenchmarksForResults(industry, state) {
           good: b.good,
           excellent: b.excellent,
           direction: b.direction || 'higher',
+          benchmarkPeriod: b.benchmarkPeriod || 'agnostic',
           matchType: newMatchType
         };
       }
