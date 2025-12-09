@@ -112,8 +112,10 @@ function loadBenchmarkConfig(industry, state) {
       poor: parseFloat(row.poor),
       average: parseFloat(row.average),
       good: parseFloat(row.good),
-      excellent: parseFloat(row.excellent)
-    })).filter(b => b.kpiId);
+      excellent: parseFloat(row.excellent),
+      direction: String(row.direction || 'higher').toLowerCase().trim(),
+      notes: String(row.notes || '').trim()
+    })).filter(b => b.kpiId && !isNaN(b.poor));
 
     // Filter by industry and state if specified
     if (industry || state) {
@@ -137,14 +139,19 @@ function loadBenchmarkConfig(industry, state) {
 
 /**
  * Get default benchmarks (hardcoded for phase 1)
+ * Includes direction: 'higher' = higher is better, 'lower' = lower is better
  * @returns {Object[]}
  */
 function getDefaultBenchmarks() {
   return [
-    { kpiId: 'booking_rate', industry: 'all', poor: 30, average: 50, good: 70, excellent: 85 },
-    { kpiId: 'close_rate', industry: 'all', poor: 20, average: 35, good: 50, excellent: 65 },
-    { kpiId: 'profit_margin', industry: 'all', poor: 5, average: 12, good: 20, excellent: 30 },
-    { kpiId: 'schedule_efficiency', industry: 'all', poor: 60, average: 80, good: 95, excellent: 100 }
+    // Standard KPIs (higher is better)
+    { kpiId: 'booking_rate', industry: 'all', state: 'all', poor: 30, average: 50, good: 70, excellent: 85, direction: 'higher' },
+    { kpiId: 'close_rate', industry: 'all', state: 'all', poor: 20, average: 35, good: 50, excellent: 65, direction: 'higher' },
+    { kpiId: 'profit_margin', industry: 'all', state: 'all', poor: 5, average: 12, good: 20, excellent: 30, direction: 'higher' },
+    { kpiId: 'schedule_efficiency', industry: 'all', state: 'all', poor: 60, average: 80, good: 95, excellent: 100, direction: 'higher' },
+    // Inverse KPIs (lower is better)
+    { kpiId: 'rework_rate', industry: 'all', state: 'all', poor: 15, average: 10, good: 5, excellent: 2, direction: 'lower' },
+    { kpiId: 'cost_per_lead', industry: 'all', state: 'all', poor: 200, average: 150, good: 100, excellent: 50, direction: 'lower' }
   ];
 }
 
@@ -628,34 +635,46 @@ function initializeSectionConfig() {
 }
 
 /**
- * Create default Config_Benchmarks sheet (with state/province support)
+ * Create default Config_Benchmarks sheet (with state/province and direction support)
  */
 function initializeBenchmarkConfig() {
   const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG_BENCHMARKS);
 
-  const headers = ['kpi_id', 'industry', 'state', 'poor', 'average', 'good', 'excellent', 'notes'];
+  // Updated headers with 'direction' column
+  const headers = ['kpi_id', 'industry', 'state', 'poor', 'average', 'good', 'excellent', 'direction', 'notes'];
 
   const sampleData = [
-    // Default benchmarks (applies to all industries and states)
-    ['booking_rate', 'all', 'all', 30, 50, 70, 85, 'Percentage of leads that become appointments'],
-    ['close_rate', 'all', 'all', 20, 35, 50, 65, 'Percentage of appointments that become sales'],
-    ['profit_margin', 'all', 'all', 5, 12, 20, 30, 'Net profit as percentage of revenue'],
-    ['schedule_efficiency', 'all', 'all', 60, 80, 95, 100, 'Utilization of available capacity'],
+    // Standard KPIs (higher is better)
+    ['booking_rate', 'all', 'all', 30, 50, 70, 85, 'higher', 'Percentage of leads that become appointments'],
+    ['close_rate', 'all', 'all', 20, 35, 50, 65, 'higher', 'Percentage of appointments that become sales'],
+    ['profit_margin', 'all', 'all', 5, 12, 20, 30, 'higher', 'Net profit as percentage of revenue'],
+    ['schedule_efficiency', 'all', 'all', 60, 80, 95, 100, 'higher', 'Utilization of available capacity'],
 
-    // Example industry-specific benchmarks
-    ['booking_rate', 'hvac', 'all', 35, 55, 75, 90, 'HVAC typically has higher booking rates'],
-    ['close_rate', 'roofing', 'all', 25, 40, 55, 70, 'Roofing often has higher close rates due to urgency'],
-    ['profit_margin', 'plumbing', 'all', 8, 15, 22, 32, 'Plumbing service calls tend to have higher margins'],
+    // Inverse KPIs (lower is better)
+    ['rework_rate', 'all', 'all', 15, 10, 5, 2, 'lower', 'Percentage of jobs requiring callback'],
+    ['cost_per_lead', 'all', 'all', 200, 150, 100, 50, 'lower', 'Marketing cost per lead'],
 
-    // Example state-specific benchmarks
-    ['booking_rate', 'all', 'california', 40, 55, 72, 88, 'California market tends to have higher booking rates'],
-    ['booking_rate', 'all', 'texas', 35, 52, 70, 85, 'Texas market benchmarks'],
-    ['profit_margin', 'all', 'ontario', 8, 14, 22, 30, 'Ontario market has slightly higher margins']
+    // Industry-specific examples (higher is better)
+    ['close_rate', 'hvac', 'all', 25, 40, 55, 70, 'higher', 'HVAC typically has higher close rates'],
+    ['close_rate', 'roofing', 'all', 30, 45, 60, 75, 'higher', 'Roofing urgency drives higher closes'],
+    ['booking_rate', 'hvac', 'all', 35, 55, 75, 90, 'higher', 'HVAC typically has higher booking rates'],
+    ['profit_margin', 'plumbing', 'all', 8, 15, 22, 32, 'higher', 'Plumbing service calls tend to have higher margins'],
+
+    // State-specific examples
+    ['profit_margin', 'all', 'california', 8, 15, 23, 33, 'higher', 'Higher COL requires higher margins'],
+    ['profit_margin', 'all', 'ontario', 7, 14, 21, 30, 'higher', 'Ontario market benchmarks']
   ];
 
   sheet.clearContents();
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Delete extra rows to keep sheet clean
+  const lastDataRow = sampleData.length + 1;
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > lastDataRow + 5) {
+    sheet.deleteRows(lastDataRow + 5, maxRows - lastDataRow - 5);
+  }
 
   // Format header row
   sheet.getRange(1, 1, 1, headers.length)
@@ -669,13 +688,14 @@ function initializeBenchmarkConfig() {
 
   sheet.setFrozenRows(1);
 
-  // Add note about future expansion
+  // Add note about direction column
   sheet.getRange(sampleData.length + 3, 1).setValue(
-    'Note: Add benchmarks by industry and/or state. Use "all" for benchmarks that apply universally. ' +
-    'Priority: state+industry > state+all > all+industry > all+all'
+    'Note: direction="higher" means higher values are better (close_rate). ' +
+    'direction="lower" means lower values are better (rework_rate, cost_per_lead). ' +
+    'Priority matching: industry+state > industry+all > all+state > all+all'
   );
 
-  log('Initialized Config_Benchmarks sheet with sample data');
+  log('Initialized Config_Benchmarks sheet with direction support');
 }
 
 /**
@@ -700,4 +720,122 @@ function initializeSettings() {
   sheet.getRange(1, 1, settings.length, 2).setValues(settings);
 
   log('Initialized _Settings sheet with defaults');
+}
+
+// ============================================================================
+// SCHEMA MIGRATION
+// ============================================================================
+
+/**
+ * Migrate Config_Benchmarks sheet to add 'direction' column if missing
+ * Existing rows get 'higher' as the default direction
+ * @returns {Object} {migrated: boolean, rowsUpdated: number, message: string}
+ */
+function migrateBenchmarksAddDirection() {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.CONFIG_BENCHMARKS);
+
+    if (!sheet) {
+      return {
+        migrated: false,
+        rowsUpdated: 0,
+        message: 'Config_Benchmarks sheet not found - no migration needed'
+      };
+    }
+
+    // Get headers
+    const lastCol = sheet.getLastColumn();
+    if (lastCol === 0) {
+      return {
+        migrated: false,
+        rowsUpdated: 0,
+        message: 'Config_Benchmarks sheet is empty - no migration needed'
+      };
+    }
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const headersLower = headers.map(h => String(h).toLowerCase().trim());
+
+    // Check if 'direction' column already exists
+    const directionIndex = headersLower.indexOf('direction');
+    if (directionIndex >= 0) {
+      return {
+        migrated: false,
+        rowsUpdated: 0,
+        message: 'direction column already exists - no migration needed'
+      };
+    }
+
+    // Find where to insert 'direction' (before 'notes' if exists, otherwise at end)
+    const notesIndex = headersLower.indexOf('notes');
+    let insertCol;
+
+    if (notesIndex >= 0) {
+      // Insert before 'notes'
+      insertCol = notesIndex + 1;  // 1-based column
+      sheet.insertColumnBefore(insertCol);
+    } else {
+      // Insert at end
+      insertCol = lastCol + 1;
+    }
+
+    // Add header
+    sheet.getRange(1, insertCol).setValue('direction');
+
+    // Format header to match other headers
+    sheet.getRange(1, insertCol)
+      .setFontWeight('bold')
+      .setBackground('#4285f4')
+      .setFontColor('#ffffff');
+
+    // Fill in 'higher' for all existing data rows
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      const directionValues = [];
+      for (let i = 2; i <= lastRow; i++) {
+        directionValues.push(['higher']);
+      }
+      sheet.getRange(2, insertCol, lastRow - 1, 1).setValues(directionValues);
+    }
+
+    // Auto-resize the new column
+    sheet.autoResizeColumn(insertCol);
+
+    log(`Migrated Config_Benchmarks: added direction column with ${lastRow - 1} rows set to 'higher'`);
+
+    return {
+      migrated: true,
+      rowsUpdated: lastRow - 1,
+      message: `Added direction column. ${lastRow - 1} existing rows set to 'higher' (default).`
+    };
+
+  } catch (error) {
+    logError('Error migrating Config_Benchmarks', error);
+    return {
+      migrated: false,
+      rowsUpdated: 0,
+      message: `Migration error: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Menu handler for benchmark migration with confirmation
+ */
+function migrateBenchmarksWithConfirmation() {
+  const ui = SpreadsheetApp.getUi();
+
+  const result = ui.alert(
+    'Migrate Benchmarks Schema',
+    'This will add a "direction" column to Config_Benchmarks if it doesn\'t exist.\n\n' +
+    'Existing benchmarks will default to "higher" (higher values are better).\n' +
+    'You can then edit specific KPIs to "lower" for metrics like rework_rate, cost_per_lead.\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (result === ui.Button.YES) {
+    const migrationResult = migrateBenchmarksAddDirection();
+    ui.alert('Migration Complete', migrationResult.message, ui.ButtonSet.OK);
+  }
 }

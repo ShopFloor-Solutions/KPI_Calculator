@@ -78,6 +78,7 @@ function generateInsights(clientData, allValues, validationIssues, kpiConfig, se
 
 /**
  * Load benchmarks for insights from Config.gs
+ * Now includes direction field for proper rating logic
  * @param {string} industry - Client industry
  * @param {string} state - Client state/province
  * @returns {Object} Benchmarks object keyed by kpiId
@@ -96,7 +97,8 @@ function loadBenchmarksForInsights(industry, state) {
           poor: benchmark.poor,
           average: benchmark.average,
           good: benchmark.good,
-          excellent: benchmark.excellent
+          excellent: benchmark.excellent,
+          direction: benchmark.direction || 'higher'  // Include direction for getRating()
         };
       }
     }
@@ -180,8 +182,8 @@ function generateBookingInsight(allValues, benchmarks) {
     return null;
   }
 
-  const benchmark = benchmarks.booking_rate || { poor: 30, average: 50, good: 70, excellent: 85 };
-  const rating = getRating(bookingRate, benchmark);
+  const benchmark = benchmarks.booking_rate || { poor: 30, average: 50, good: 70, excellent: 85, direction: 'higher' };
+  const rating = getRating(bookingRate, benchmark, benchmark.direction || 'higher');
 
   let status, summary, detail;
   const recommendations = [];
@@ -240,8 +242,8 @@ function generateSalesInsight(allValues, benchmarks) {
     return null;
   }
 
-  const benchmark = benchmarks.close_rate || { poor: 20, average: 35, good: 50, excellent: 65 };
-  const rating = getRating(closeRate, benchmark);
+  const benchmark = benchmarks.close_rate || { poor: 20, average: 35, good: 50, excellent: 65, direction: 'higher' };
+  const rating = getRating(closeRate, benchmark, benchmark.direction || 'higher');
 
   let status, summary, detail;
   const recommendations = [];
@@ -301,7 +303,7 @@ function generateProfitabilityInsight(allValues, benchmarks) {
     return null;
   }
 
-  const benchmark = benchmarks.profit_margin || { poor: 5, average: 12, good: 20, excellent: 30 };
+  const benchmark = benchmarks.profit_margin || { poor: 5, average: 12, good: 20, excellent: 30, direction: 'higher' };
 
   let status, summary, detail;
   const recommendations = [];
@@ -327,7 +329,7 @@ function generateProfitabilityInsight(allValues, benchmarks) {
     };
   }
 
-  const rating = getRating(profitMargin, benchmark);
+  const rating = getRating(profitMargin, benchmark, benchmark.direction || 'higher');
 
   if (rating === 'poor') {
     status = 'concern';
@@ -512,18 +514,8 @@ function generateSectionInsight(validationIssues, allValues, kpiConfig, sectionC
 // HELPER FUNCTIONS
 // ============================================================================
 
-/**
- * Get rating based on value and benchmarks
- * @param {number} value
- * @param {Object} benchmark - {poor, average, good, excellent}
- * @returns {string} 'poor', 'average', 'good', or 'excellent'
- */
-function getRating(value, benchmark) {
-  if (value < benchmark.poor) return 'poor';
-  if (value < benchmark.average) return 'average';
-  if (value < benchmark.good) return 'good';
-  return 'excellent';
-}
+// Note: getRating() and getRatingDisplay() functions are now in BenchmarkEngine.gs
+// They support both 'higher is better' and 'lower is better' KPIs via the direction parameter
 
 /**
  * Identify which business sections need attention
