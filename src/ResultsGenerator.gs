@@ -28,7 +28,23 @@ const COLORS = {
   SECTION_HEADER: '#3f51b5', // Indigo
 
   // Alternating rows
-  ROW_ALT: '#f5f5f5'
+  ROW_ALT: '#f5f5f5',
+
+  // Benchmark rating colors (background)
+  RATING_CRITICAL_BG: '#ffcdd2',   // Light red
+  RATING_POOR_BG: '#ffebee',       // Very light red
+  RATING_AVERAGE_BG: '#fff3e0',    // Light orange
+  RATING_GOOD_BG: '#e8f5e9',       // Light green
+  RATING_EXCELLENT_BG: '#c8e6c9',  // Medium green
+  RATING_NONE_BG: '#f5f5f5',       // Light gray
+
+  // Benchmark rating colors (text)
+  RATING_CRITICAL_TEXT: '#b71c1c', // Dark red
+  RATING_POOR_TEXT: '#c62828',     // Red
+  RATING_AVERAGE_TEXT: '#f57c00',  // Orange
+  RATING_GOOD_TEXT: '#2e7d32',     // Green
+  RATING_EXCELLENT_TEXT: '#1b5e20', // Dark green
+  RATING_NONE_TEXT: '#9e9e9e'      // Gray
 };
 
 // ============================================================================
@@ -64,6 +80,9 @@ function generateResults(clientId, clientData, allValues, validationResult, insi
     log(`Results filtered to ${tierKPIs.length} KPIs for tier: ${clientTier}`);
   }
 
+  // Load benchmarks for this client's industry/state
+  const benchmarks = loadBenchmarksForResults(clientData.industry, clientData.state);
+
   // Write results
   let currentRow = 1;
 
@@ -80,7 +99,8 @@ function generateResults(clientId, clientData, allValues, validationResult, insi
     allValues,
     tierKPIs,  // Use tier-filtered KPIs
     sectionConfig,
-    validationResult.issues
+    validationResult.issues,
+    benchmarks  // Pass benchmarks for rating
   );
   currentRow += 1; // Blank row
 
@@ -93,7 +113,8 @@ function generateResults(clientId, clientData, allValues, validationResult, insi
     allValues,
     tierKPIs,  // Use tier-filtered KPIs
     sectionConfig,
-    validationResult.issues
+    validationResult.issues,
+    benchmarks  // Pass benchmarks for rating
   );
   currentRow += 1; // Blank row
 
@@ -124,14 +145,16 @@ function clearResultsSheet() {
   sheet.clearContents();
   sheet.clearFormats();
 
-  // Reset column widths
+  // Reset column widths (8 columns now with Rating and vs Benchmark)
   try {
     sheet.setColumnWidth(1, 200); // KPI Name
     sheet.setColumnWidth(2, 120); // Value
     sheet.setColumnWidth(3, 100); // Type
     sheet.setColumnWidth(4, 60);  // Status
-    sheet.setColumnWidth(5, 150); // Sections
-    sheet.setColumnWidth(6, 300); // Notes
+    sheet.setColumnWidth(5, 80);  // Rating
+    sheet.setColumnWidth(6, 110); // vs Benchmark
+    sheet.setColumnWidth(7, 150); // Sections
+    sheet.setColumnWidth(8, 300); // Notes
   } catch (e) {
     // Ignore column width errors
   }
@@ -164,10 +187,11 @@ function clearValidationLogSheet() {
  */
 function writeResultsHeader(sheet, startRow, clientData, overallStatus) {
   let row = startRow;
+  const colSpan = 8;  // Updated for 8 columns
 
   // Title
   sheet.getRange(row, 1).setValue('OPERATIONAL KPI ANALYSIS');
-  sheet.getRange(row, 1, 1, 6).merge();
+  sheet.getRange(row, 1, 1, colSpan).merge();
   sheet.getRange(row, 1)
     .setFontSize(18)
     .setFontWeight('bold')
@@ -178,7 +202,7 @@ function writeResultsHeader(sheet, startRow, clientData, overallStatus) {
   // Client info
   const clientInfo = `${clientData.companyName} | ${clientData.industry} | ${clientData.state} | ${capitalizeFirst(clientData.dataPeriod)} Data`;
   sheet.getRange(row, 1).setValue(clientInfo);
-  sheet.getRange(row, 1, 1, 6).merge();
+  sheet.getRange(row, 1, 1, colSpan).merge();
   sheet.getRange(row, 1)
     .setFontSize(12)
     .setHorizontalAlignment('center')
@@ -195,7 +219,7 @@ function writeResultsHeader(sheet, startRow, clientData, overallStatus) {
     const tierLabel = tierLabels[clientData.formTier.toLowerCase()] || clientData.formTier;
     const tierText = `Assessment Type: ${tierLabel}`;
     sheet.getRange(row, 1).setValue(tierText);
-    sheet.getRange(row, 1, 1, 6).merge();
+    sheet.getRange(row, 1, 1, colSpan).merge();
     sheet.getRange(row, 1)
       .setFontSize(11)
       .setHorizontalAlignment('center')
@@ -207,7 +231,7 @@ function writeResultsHeader(sheet, startRow, clientData, overallStatus) {
   // Analysis timestamp
   const timestamp = `Analyzed: ${formatDate(new Date())}`;
   sheet.getRange(row, 1).setValue(timestamp);
-  sheet.getRange(row, 1, 1, 6).merge();
+  sheet.getRange(row, 1, 1, colSpan).merge();
   sheet.getRange(row, 1)
     .setFontSize(10)
     .setHorizontalAlignment('center')
@@ -217,7 +241,7 @@ function writeResultsHeader(sheet, startRow, clientData, overallStatus) {
   // Overall status
   const statusText = `Status: ${overallStatus.toUpperCase()}`;
   sheet.getRange(row, 1).setValue(statusText);
-  sheet.getRange(row, 1, 1, 6).merge();
+  sheet.getRange(row, 1, 1, colSpan).merge();
 
   const statusColor = getStatusColor(overallStatus);
   sheet.getRange(row, 1)
@@ -237,7 +261,7 @@ function writeResultsHeader(sheet, startRow, clientData, overallStatus) {
 // ============================================================================
 
 /**
- * Write a KPI section (Volume or Efficiency)
+ * Write a KPI section (Volume or Efficiency) with benchmark ratings
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
  * @param {number} startRow
  * @param {string} sectionTitle
@@ -246,14 +270,16 @@ function writeResultsHeader(sheet, startRow, clientData, overallStatus) {
  * @param {Object[]} kpiConfig
  * @param {Object[]} sectionConfig
  * @param {Object[]} validationIssues
+ * @param {Object} benchmarks - Benchmarks keyed by kpiId (from loadBenchmarksForResults)
  * @returns {number} Next row number
  */
-function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpiConfig, sectionConfig, validationIssues) {
+function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpiConfig, sectionConfig, validationIssues, benchmarks) {
   let row = startRow;
+  const colSpan = 8;  // Updated for 8 columns
 
   // Section header
   sheet.getRange(row, 1).setValue(sectionTitle);
-  sheet.getRange(row, 1, 1, 6).merge();
+  sheet.getRange(row, 1, 1, colSpan).merge();
   sheet.getRange(row, 1)
     .setFontSize(14)
     .setFontWeight('bold')
@@ -261,8 +287,8 @@ function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpi
     .setFontColor(COLORS.HEADER_TEXT);
   row++;
 
-  // Column headers
-  const headers = ['KPI Name', 'Value', 'Type', 'Status', 'Sections', 'Notes'];
+  // Column headers - updated with Rating and vs Benchmark
+  const headers = ['KPI Name', 'Value', 'Type', 'Status', 'Rating', 'vs Benchmark', 'Sections', 'Notes'];
   sheet.getRange(row, 1, 1, headers.length).setValues([headers]);
   sheet.getRange(row, 1, 1, headers.length)
     .setFontWeight('bold')
@@ -289,11 +315,17 @@ function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpi
     const sectionNames = getSectionNamesForKPI(kpi, sectionConfig);
     const notes = getKPINotes(kpi.id, value, validationIssues);
 
+    // Get benchmark rating using the new BenchmarkEngine functions
+    const benchmark = benchmarks ? benchmarks[kpi.id] : null;
+    const ratingDisplay = getRatingDisplay(value, benchmark, benchmark?.direction || 'higher');
+
     const rowData = [
       kpi.name,
       formatValue(value, kpi.dataType),
       capitalizeFirst(kpi.type),
       status.icon,
+      ratingDisplay.label || '—',           // Rating column
+      ratingDisplay.comparison || '',        // vs Benchmark column
       sectionNames,
       notes
     ];
@@ -303,29 +335,84 @@ function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpi
     // Apply row formatting
     const rowRange = sheet.getRange(row, 1, 1, rowData.length);
 
-    // Pillar-based background color
+    // Pillar-based background color (for non-rating columns)
     const pillarColor = getPillarColor(kpi.pillar);
     rowRange.setBackground(pillarColor);
 
-    // Status-based text color for status column
+    // Status-based text color for status column (col 4)
     sheet.getRange(row, 4)
       .setFontColor(status.color)
       .setFontWeight('bold')
       .setHorizontalAlignment('center');
 
+    // Rating column formatting (col 5) - override pillar color with rating color
+    if (ratingDisplay.rating) {
+      const ratingBgColor = getRatingBackgroundColor(ratingDisplay.rating);
+      const ratingTextColor = getRatingTextColor(ratingDisplay.rating);
+      sheet.getRange(row, 5)
+        .setBackground(ratingBgColor)
+        .setFontColor(ratingTextColor)
+        .setFontWeight('bold')
+        .setHorizontalAlignment('center');
+    } else {
+      sheet.getRange(row, 5)
+        .setBackground(COLORS.RATING_NONE_BG)
+        .setFontColor(COLORS.RATING_NONE_TEXT)
+        .setHorizontalAlignment('center');
+    }
+
+    // vs Benchmark column formatting (col 6) - gray italic
+    sheet.getRange(row, 6)
+      .setFontColor('#9e9e9e')
+      .setFontStyle('italic')
+      .setFontSize(9);
+
     // Value alignment
     sheet.getRange(row, 2).setHorizontalAlignment('right');
 
-    // Alternating row tint
+    // Alternating row tint (but keep rating column with its own color)
     if (i % 2 === 1) {
-      // Slightly darker for alternating rows
-      rowRange.setBackground(adjustColor(pillarColor, -5));
+      // Apply alternating color to non-rating columns only
+      sheet.getRange(row, 1, 1, 4).setBackground(adjustColor(pillarColor, -5));
+      sheet.getRange(row, 6, 1, 3).setBackground(adjustColor(pillarColor, -5));
     }
 
     row++;
   }
 
   return row;
+}
+
+/**
+ * Get background color for a rating level
+ * @param {string} rating - Rating level: critical, poor, average, good, excellent
+ * @returns {string} Hex color
+ */
+function getRatingBackgroundColor(rating) {
+  switch (rating) {
+    case 'critical': return COLORS.RATING_CRITICAL_BG;
+    case 'poor': return COLORS.RATING_POOR_BG;
+    case 'average': return COLORS.RATING_AVERAGE_BG;
+    case 'good': return COLORS.RATING_GOOD_BG;
+    case 'excellent': return COLORS.RATING_EXCELLENT_BG;
+    default: return COLORS.RATING_NONE_BG;
+  }
+}
+
+/**
+ * Get text color for a rating level
+ * @param {string} rating - Rating level: critical, poor, average, good, excellent
+ * @returns {string} Hex color
+ */
+function getRatingTextColor(rating) {
+  switch (rating) {
+    case 'critical': return COLORS.RATING_CRITICAL_TEXT;
+    case 'poor': return COLORS.RATING_POOR_TEXT;
+    case 'average': return COLORS.RATING_AVERAGE_TEXT;
+    case 'good': return COLORS.RATING_GOOD_TEXT;
+    case 'excellent': return COLORS.RATING_EXCELLENT_TEXT;
+    default: return COLORS.RATING_NONE_TEXT;
+  }
 }
 
 // ============================================================================
@@ -341,10 +428,11 @@ function writeKPISection(sheet, startRow, sectionTitle, category, allValues, kpi
  */
 function writeInsightsSection(sheet, startRow, insights) {
   let row = startRow;
+  const colSpan = 8;  // Updated for 8 columns
 
   // Section header
   sheet.getRange(row, 1).setValue('INSIGHTS & FINDINGS');
-  sheet.getRange(row, 1, 1, 6).merge();
+  sheet.getRange(row, 1, 1, colSpan).merge();
   sheet.getRange(row, 1)
     .setFontSize(14)
     .setFontWeight('bold')
@@ -354,7 +442,7 @@ function writeInsightsSection(sheet, startRow, insights) {
 
   if (!insights || insights.length === 0) {
     sheet.getRange(row, 1).setValue('No insights generated. More data may be needed.');
-    sheet.getRange(row, 1, 1, 6).merge();
+    sheet.getRange(row, 1, 1, colSpan).merge();
     sheet.getRange(row, 1).setFontStyle('italic').setFontColor('#999999');
     return row + 1;
   }
@@ -364,7 +452,7 @@ function writeInsightsSection(sheet, startRow, insights) {
     // Insight title
     const statusIcon = getInsightStatusIcon(insight.status);
     sheet.getRange(row, 1).setValue(`${statusIcon} ${insight.title}`);
-    sheet.getRange(row, 1, 1, 6).merge();
+    sheet.getRange(row, 1, 1, colSpan).merge();
     sheet.getRange(row, 1)
       .setFontWeight('bold')
       .setFontSize(11)
@@ -373,14 +461,14 @@ function writeInsightsSection(sheet, startRow, insights) {
 
     // Summary
     sheet.getRange(row, 1).setValue(insight.summary);
-    sheet.getRange(row, 1, 1, 6).merge();
+    sheet.getRange(row, 1, 1, colSpan).merge();
     sheet.getRange(row, 1).setWrap(true);
     row++;
 
     // Detail (if different from summary)
     if (insight.detail && insight.detail !== insight.summary) {
       sheet.getRange(row, 1).setValue(insight.detail);
-      sheet.getRange(row, 1, 1, 6).merge();
+      sheet.getRange(row, 1, 1, colSpan).merge();
       sheet.getRange(row, 1)
         .setWrap(true)
         .setFontColor('#666666')
@@ -392,7 +480,7 @@ function writeInsightsSection(sheet, startRow, insights) {
     if (insight.recommendations && insight.recommendations.length > 0) {
       for (const rec of insight.recommendations) {
         sheet.getRange(row, 1).setValue(`  → ${rec}`);
-        sheet.getRange(row, 1, 1, 6).merge();
+        sheet.getRange(row, 1, 1, colSpan).merge();
         sheet.getRange(row, 1)
           .setFontColor('#1565c0')
           .setFontSize(10);
@@ -494,19 +582,21 @@ function writeValidationLog(sheet, issues, kpiConfig, sectionConfig) {
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
  */
 function formatResultsSheet(sheet) {
-  // Auto-resize columns
-  for (let i = 1; i <= 6; i++) {
+  // Auto-resize columns (8 columns now)
+  for (let i = 1; i <= 8; i++) {
     sheet.autoResizeColumn(i);
   }
 
   // Set minimum widths
-  if (sheet.getColumnWidth(1) < 180) sheet.setColumnWidth(1, 180);
-  if (sheet.getColumnWidth(6) < 250) sheet.setColumnWidth(6, 250);
+  if (sheet.getColumnWidth(1) < 180) sheet.setColumnWidth(1, 180);  // KPI Name
+  if (sheet.getColumnWidth(5) < 80) sheet.setColumnWidth(5, 80);    // Rating
+  if (sheet.getColumnWidth(6) < 100) sheet.setColumnWidth(6, 100);  // vs Benchmark
+  if (sheet.getColumnWidth(8) < 250) sheet.setColumnWidth(8, 250);  // Notes
 
   // Add borders to data sections
   const lastRow = sheet.getLastRow();
   if (lastRow > 4) {
-    sheet.getRange(5, 1, lastRow - 4, 6).setBorder(
+    sheet.getRange(5, 1, lastRow - 4, 8).setBorder(
       true, true, true, true, false, false,
       '#cccccc', SpreadsheetApp.BorderStyle.SOLID
     );
