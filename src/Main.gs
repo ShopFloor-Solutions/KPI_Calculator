@@ -65,6 +65,7 @@ function createMenu() {
 
 /**
  * Main entry point for running analysis on active client
+ * Now tier-aware: checks form_tier and prompts if missing
  * Orchestrates: load config → get client data → calculate KPIs → validate → generate results
  */
 function runAnalysis() {
@@ -97,39 +98,53 @@ function runAnalysis() {
       return;
     }
 
+    // 4. Check form_tier - prompt user if not set
+    if (!clientData.formTier) {
+      const tier = promptForFormTier(clientData.companyName);
+      if (!tier) {
+        showToast('Analysis cancelled - form tier not set', 'KPI Calculator', 3);
+        return;
+      }
+      clientData.formTier = tier;
+      updateClientFormTier(clientId, tier);
+    }
+
+    log(`Running analysis for ${clientData.companyName}, tier: ${clientData.formTier}`);
+
     showToast('Calculating KPIs...', 'KPI Calculator', 2);
 
-    // 4. Calculate all KPIs
+    // 5. Calculate all KPIs (tier-aware)
     const calculatedValues = calculateAllKPIs(clientData, kpiConfig);
 
-    // 5. Merge raw inputs with calculated values
+    // 6. Merge raw inputs with calculated values
     const allValues = merge(clientData.rawInputs, calculatedValues);
 
     showToast('Validating data...', 'KPI Calculator', 2);
 
-    // 6. Run validations
-    const validationResult = validateAll(allValues, validationConfig, kpiConfig);
+    // 7. Run validations (tier-aware)
+    const validationResult = validateAll(allValues, validationConfig, kpiConfig, clientData.formTier);
 
     showToast('Generating insights...', 'KPI Calculator', 2);
 
-    // 7. Generate insights
+    // 8. Generate insights (uses tier-filtered KPIs)
+    const tierKPIs = getKPIsForTier(kpiConfig, clientData.formTier);
     const insights = generateInsights(
       clientData,
       allValues,
       validationResult.issues,
-      kpiConfig,
+      tierKPIs,
       sectionConfig
     );
 
     showToast('Writing results...', 'KPI Calculator', 2);
 
-    // 8. Generate results sheet
+    // 9. Generate results sheet (tier-aware)
     generateResults(clientId, clientData, allValues, validationResult, insights, kpiConfig, sectionConfig);
 
-    // 9. Update client analysis status
+    // 10. Update client analysis status
     updateClientAnalysisStatus(clientId, ANALYSIS_STATUS.COMPLETED);
 
-    // 10. Calculate elapsed time
+    // 11. Calculate elapsed time
     const elapsed = ((new Date() - startTime) / 1000).toFixed(1);
 
     showToast(
@@ -138,7 +153,7 @@ function runAnalysis() {
       5
     );
 
-    log(`Analysis completed for client ${clientId} in ${elapsed}s`);
+    log(`Analysis completed for client ${clientId} in ${elapsed}s, tier: ${clientData.formTier}`);
 
   } catch (error) {
     logError('Error in runAnalysis', error);
@@ -154,6 +169,51 @@ function runAnalysis() {
       // Ignore
     }
   }
+}
+
+/**
+ * Prompt user to select form tier for a client
+ * @param {string} companyName - Company name for display
+ * @returns {string|null} Selected tier or null if cancelled
+ */
+function promptForFormTier(companyName) {
+  const ui = SpreadsheetApp.getUi();
+
+  const result = ui.alert(
+    'Form Tier Required',
+    `Client "${companyName}" does not have a form tier set.\n\n` +
+    'Please set the assessment type:\n' +
+    '• Onboarding - Quick assessment (~20 KPIs)\n' +
+    '• Detailed - Comprehensive diagnostic (~48 KPIs)\n' +
+    '• Section Deep - Full operational analysis (all KPIs)\n\n' +
+    'Click YES to select a tier, or NO to cancel.',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (result !== ui.Button.YES) {
+    return null;
+  }
+
+  // Show tier selection prompt
+  const tierResult = ui.prompt(
+    'Select Form Tier',
+    'Enter the tier (onboarding, detailed, or section_deep):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (tierResult.getSelectedButton() !== ui.Button.OK) {
+    return null;
+  }
+
+  const tierInput = tierResult.getResponseText().toLowerCase().trim();
+  const validTiers = ['onboarding', 'detailed', 'section_deep'];
+
+  if (!validTiers.includes(tierInput)) {
+    showAlert(`Invalid tier "${tierInput}". Please use: onboarding, detailed, or section_deep`);
+    return null;
+  }
+
+  return tierInput;
 }
 
 /**

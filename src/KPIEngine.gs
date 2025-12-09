@@ -11,19 +11,40 @@
 
 /**
  * Calculate all derived KPIs for a client
- * @param {Object} clientData - Client object with rawInputs
+ * Now tier-aware: only calculates KPIs appropriate for client's form_tier
+ * @param {Object} clientData - Client object with rawInputs and formTier
  * @param {Object[]} kpiConfig - KPI definitions
  * @returns {Object} Calculated KPI values {kpi_id: value}
  */
 function calculateAllKPIs(clientData, kpiConfig) {
-  const calculatedKPIs = kpiConfig.filter(k => k.type === 'calculated');
   const periodDays = clientData.periodDays || 30;
+  const clientTier = clientData.formTier || '';
+
+  // Get KPIs applicable to this tier (if tier is set)
+  let tierKPIs = kpiConfig;
+  if (clientTier) {
+    tierKPIs = getKPIsForTier(kpiConfig, clientTier);
+    log(`Tier ${clientTier}: ${tierKPIs.length} KPIs applicable out of ${kpiConfig.length} total`);
+  }
+
+  // Build set of tier KPI IDs for dependency checking
+  const tierKPIIds = new Set(tierKPIs.map(k => k.id));
+
+  // Get calculated KPIs for this tier
+  const calculatedKPIs = tierKPIs.filter(k => k.type === 'calculated');
+
+  // Filter to only those with all dependencies in the tier
+  const calculableKPIs = calculatedKPIs.filter(kpi => {
+    if (!kpi.formula) return false;
+    const deps = extractDependencies(kpi.formula);
+    return deps.every(dep => tierKPIIds.has(dep) || /^-?\d+\.?\d*$/.test(dep));
+  });
 
   // Start with raw inputs
   const allValues = clone(clientData.rawInputs);
 
   // Sort calculated KPIs by dependency order
-  const sortedKPIs = sortByDependencyOrder(calculatedKPIs, kpiConfig);
+  const sortedKPIs = sortByDependencyOrder(calculableKPIs, tierKPIs);
 
   // Calculate each KPI in order
   for (const kpiDef of sortedKPIs) {
@@ -42,7 +63,7 @@ function calculateAllKPIs(clientData, kpiConfig) {
 
   // Extract only calculated values (not raw inputs)
   const result = {};
-  for (const kpi of calculatedKPIs) {
+  for (const kpi of calculableKPIs) {
     result[kpi.id] = allValues[kpi.id];
   }
 

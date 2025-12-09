@@ -763,6 +763,49 @@ function addMissingClientColumns(sheet) {
 }
 
 // ============================================================================
+// FORM TIER DETECTION
+// ============================================================================
+
+/**
+ * Detect form tier based on which KPIs were submitted
+ * @param {string[]} formHeaders - Column headers from form response
+ * @returns {string} "onboarding" | "detailed" | "section_deep"
+ */
+function detectFormTier(formHeaders) {
+  const kpiConfig = loadKPIConfig();
+
+  // Create mapping from KPI name to tier
+  const nameToTier = {};
+  for (const kpi of kpiConfig) {
+    if (kpi.type === 'input' && kpi.formTier) {
+      nameToTier[kpi.name.toLowerCase()] = kpi.formTier;
+    }
+  }
+
+  // Count KPIs from each tier in the form
+  let hasOnboarding = false;
+  let hasDetailed = false;
+  let hasSectionDeep = false;
+
+  for (const header of formHeaders) {
+    const headerLower = String(header).toLowerCase().trim();
+    const tier = nameToTier[headerLower];
+
+    if (tier === 'onboarding') hasOnboarding = true;
+    else if (tier === 'detailed') hasDetailed = true;
+    else if (tier === 'section_deep') hasSectionDeep = true;
+  }
+
+  // Determine tier based on highest tier questions present
+  if (hasSectionDeep) return 'section_deep';
+  if (hasDetailed) return 'detailed';
+  if (hasOnboarding) return 'onboarding';
+
+  // Default to onboarding if no KPIs matched (shouldn't happen)
+  return 'onboarding';
+}
+
+// ============================================================================
 // FORM RESPONSE MAPPING
 // ============================================================================
 

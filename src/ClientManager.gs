@@ -60,6 +60,7 @@ function getClientData(clientId) {
     state: client.state || '',
     dataPeriod: client.data_period || 'monthly',
     periodDays: parseInt(client.period_days, 10) || getPeriodDays(client.data_period),
+    formTier: client.form_tier || '',  // Empty string means unset - caller should prompt
     submittedAt: client.timestamp ? new Date(client.timestamp) : new Date(),
     analysisStatus: client.analysis_status || ANALYSIS_STATUS.PENDING,
     lastAnalyzed: client.last_analyzed ? new Date(client.last_analyzed) : null,
@@ -224,6 +225,7 @@ function generateClientId(companyName) {
 /**
  * Process new form submission
  * Called by trigger - reads from form responses sheet, maps columns, writes to Clients sheet
+ * Now tier-aware: detects form tier and handles updates to existing clients
  * @param {Object} e - Form submit event
  */
 function processNewSubmission(e) {
@@ -264,26 +266,45 @@ function processNewSubmission(e) {
     const formHeaders = formSheet.getRange(1, 1, 1, formSheet.getLastColumn()).getValues()[0];
     const formData = formSheet.getRange(formLastRow, 1, 1, formSheet.getLastColumn()).getValues()[0];
 
+    // Detect form tier from questions asked
+    const formTier = detectFormTier(formHeaders);
+    log(`Detected form tier: ${formTier}`);
+
     // Build column mapping (form question title -> kpi_id or field name)
     const columnMapping = buildFormColumnMapping();
 
     // Map form data to client record
     const clientRecord = mapFormDataToClient(formHeaders, formData, columnMapping);
 
-    // Generate client ID
-    const clientId = generateClientId(clientRecord.company_name || 'Unknown');
-    clientRecord.client_id = clientId;
-    clientRecord.timestamp = clientRecord.timestamp || new Date();
-    clientRecord.period_days = getPeriodDays(clientRecord.data_period);
-    clientRecord.analysis_status = ANALYSIS_STATUS.PENDING;
+    // Add form_tier to record
+    clientRecord.form_tier = formTier;
 
-    // Write to Clients sheet
-    const clientsSheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
-    writeClientRecord(clientsSheet, clientRecord);
+    // Check if client already exists (by email or company name)
+    const existingClient = findExistingClient(
+      clientRecord.contact_email,
+      clientRecord.company_name
+    );
 
-    log(`Processed new submission: ${clientId} (${clientRecord.company_name})`);
+    if (existingClient) {
+      // UPDATE existing client row
+      updateClientRecord(existingClient.rowIndex, clientRecord, formTier);
+      log(`Updated existing client: ${existingClient.clientId} (${clientRecord.company_name}), tier: ${formTier}`);
+      return existingClient.clientId;
+    } else {
+      // CREATE new client row
+      const clientId = generateClientId(clientRecord.company_name || 'Unknown');
+      clientRecord.client_id = clientId;
+      clientRecord.timestamp = clientRecord.timestamp || new Date();
+      clientRecord.period_days = getPeriodDays(clientRecord.data_period);
+      clientRecord.analysis_status = ANALYSIS_STATUS.PENDING;
 
-    return clientId;
+      // Write to Clients sheet
+      const clientsSheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
+      writeClientRecord(clientsSheet, clientRecord);
+
+      log(`Created new client: ${clientId} (${clientRecord.company_name}), tier: ${formTier}`);
+      return clientId;
+    }
 
   } catch (error) {
     logError('Error processing new submission', error);
@@ -381,7 +402,7 @@ function writeClientRecord(sheet, record) {
     // Standard field names that are always valid
     const standardFields = new Set([
       'client_id', 'timestamp', 'company_name', 'contact_email',
-      'industry', 'state', 'data_period', 'period_days',
+      'industry', 'state', 'data_period', 'period_days', 'form_tier',
       'analysis_status', 'last_analyzed', 'notes'
     ]);
 
@@ -609,7 +630,7 @@ function syncClientsSchema() {
   // Define required system columns (always first)
   const systemColumns = [
     'client_id', 'timestamp', 'company_name', 'contact_email',
-    'industry', 'state', 'data_period', 'period_days'
+    'industry', 'state', 'data_period', 'period_days', 'form_tier'
   ];
 
   // Get all input KPI IDs
@@ -696,6 +717,183 @@ function syncClientsSchemaWithConfirmation() {
       ui.alert('Error', 'Failed to sync schema: ' + error.message, ui.ButtonSet.OK);
     }
   }
+}
+
+// ============================================================================
+// CLIENT LOOKUP AND UPDATE (Tier-Aware)
+// ============================================================================
+
+/**
+ * Find existing client by email address
+ * @param {string} email - Contact email to search for
+ * @returns {Object|null} {rowIndex, data, clientId} or null
+ */
+function findClientByEmail(email) {
+  if (!email || email.trim() === '') return null;
+
+  const sheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailCol = headers.findIndex(h => String(h).toLowerCase() === 'contact_email');
+  const clientIdCol = headers.findIndex(h => String(h).toLowerCase() === 'client_id');
+
+  if (emailCol < 0) return null;
+
+  const emailLower = email.toLowerCase().trim();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailCol]).toLowerCase().trim() === emailLower) {
+      return {
+        rowIndex: i + 1,  // 1-based row index
+        data: data[i],
+        clientId: clientIdCol >= 0 ? data[i][clientIdCol] : null
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Find existing client by company name
+ * @param {string} companyName - Company name to search for
+ * @returns {Object|null} {rowIndex, data, clientId} or null
+ */
+function findClientByCompanyName(companyName) {
+  if (!companyName || companyName.trim() === '') return null;
+
+  const sheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const nameCol = headers.findIndex(h => String(h).toLowerCase() === 'company_name');
+  const clientIdCol = headers.findIndex(h => String(h).toLowerCase() === 'client_id');
+
+  if (nameCol < 0) return null;
+
+  const nameLower = companyName.toLowerCase().trim();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][nameCol]).toLowerCase().trim() === nameLower) {
+      return {
+        rowIndex: i + 1,  // 1-based row index
+        data: data[i],
+        clientId: clientIdCol >= 0 ? data[i][clientIdCol] : null
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Find existing client by email OR company name
+ * @param {string} email - Contact email
+ * @param {string} companyName - Company name
+ * @returns {Object|null} {rowIndex, data, clientId} or null
+ */
+function findExistingClient(email, companyName) {
+  // Try email first (more unique)
+  const byEmail = findClientByEmail(email);
+  if (byEmail) return byEmail;
+
+  // Fall back to company name
+  return findClientByCompanyName(companyName);
+}
+
+/**
+ * Get the higher of two tiers
+ * @param {string} tier1 - First tier
+ * @param {string} tier2 - Second tier
+ * @returns {string} Higher tier
+ */
+function getHigherTier(tier1, tier2) {
+  const tierOrder = { 'onboarding': 1, 'detailed': 2, 'section_deep': 3 };
+  const t1 = tierOrder[(tier1 || '').toLowerCase()] || 0;
+  const t2 = tierOrder[(tier2 || '').toLowerCase()] || 0;
+
+  if (t2 >= t1) return tier2 || tier1;
+  return tier1;
+}
+
+/**
+ * Update existing client row with new data from form submission
+ * Merges new data with existing, keeping values for fields not in new data
+ * Updates form_tier to the higher tier
+ * @param {number} rowIndex - 1-based row index in Clients sheet
+ * @param {Object} newData - New KPI values from form
+ * @param {string} newTier - New form tier
+ */
+function updateClientRecord(rowIndex, newData, newTier) {
+  const sheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const headersLower = headers.map(h => String(h).toLowerCase());
+
+  // Get existing row data
+  const existingRow = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  // Merge: new data overwrites, but keep existing values for fields not in new data
+  const newDataKeys = Object.keys(newData);
+  for (let i = 0; i < headers.length; i++) {
+    const headerLower = headersLower[i];
+
+    // Find matching key in new data (case-insensitive)
+    for (const key of newDataKeys) {
+      if (key.toLowerCase() === headerLower) {
+        const newValue = newData[key];
+        // Only overwrite if new value is not empty
+        if (newValue !== undefined && newValue !== null && newValue !== '') {
+          existingRow[i] = newValue;
+        }
+        break;
+      }
+    }
+  }
+
+  // Update form_tier to the higher tier
+  const tierIndex = headersLower.indexOf('form_tier');
+  if (tierIndex >= 0) {
+    const currentTier = existingRow[tierIndex] || '';
+    existingRow[tierIndex] = getHigherTier(currentTier, newTier);
+  }
+
+  // Update timestamp
+  const tsIndex = headersLower.indexOf('timestamp');
+  if (tsIndex >= 0) {
+    existingRow[tsIndex] = new Date();
+  }
+
+  // Reset analysis status since data changed
+  const statusIndex = headersLower.indexOf('analysis_status');
+  if (statusIndex >= 0) {
+    existingRow[statusIndex] = ANALYSIS_STATUS.PENDING;
+  }
+
+  // Write back
+  sheet.getRange(rowIndex, 1, 1, existingRow.length).setValues([existingRow]);
+
+  log(`Updated existing client at row ${rowIndex}, tier: ${existingRow[tierIndex] || newTier}`);
+}
+
+/**
+ * Update client's form_tier
+ * @param {string} clientId - Client ID
+ * @param {string} newTier - New form tier
+ */
+function updateClientFormTier(clientId, newTier) {
+  const sheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
+  const clientIdCol = getColumnByHeader(sheet, 'client_id');
+  const tierCol = getColumnByHeader(sheet, 'form_tier');
+
+  if (clientIdCol < 0 || tierCol < 0) {
+    logError('Could not find required columns for tier update');
+    return;
+  }
+
+  const row = findRowByValue(sheet, clientIdCol, clientId);
+
+  if (row < 0) {
+    logError(`Client not found for tier update: ${clientId}`);
+    return;
+  }
+
+  sheet.getRange(row, tierCol).setValue(newTier);
+  log(`Updated client ${clientId} form_tier to ${newTier}`);
 }
 
 /**
