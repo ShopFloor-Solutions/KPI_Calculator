@@ -45,7 +45,11 @@ function loadKPIConfig() {
         toolCategory: String(row.tool_category || '').toLowerCase().trim(),
         recommendedTool: String(row.recommended_tool || '').trim(),
         toolNotes: String(row.tool_notes || '').trim(),
-        importance: String(row.importance || '').trim()
+        importance: String(row.importance || '').trim(),
+        // Visibility gap detection columns (v2.1)
+        visibilityFlag: String(row.visibility_flag || '').toLowerCase().trim() || null,
+        missingMessage: String(row.missing_message || '').trim() || null,
+        missingRecommendation: String(row.missing_recommendation || '').trim() || null
       };
     })
     .filter(kpi => kpi.id); // Filter out rows without ID
@@ -136,6 +140,70 @@ function loadBenchmarkConfig(industry, state) {
     log('Benchmarks sheet not found or empty - using defaults');
     return getDefaultBenchmarks();
   }
+}
+
+/**
+ * Load insight configuration from Config_Insights sheet
+ * @returns {Object[]} Array of insight rule objects
+ */
+function loadInsightConfig() {
+  try {
+    const sheet = getRequiredSheet(SHEET_NAMES.CONFIG_INSIGHTS);
+    const data = sheetToObjects(sheet);
+
+    return data
+      .filter(row => row.active === true || row.active === 'TRUE' || row.active === 1)
+      .map(row => ({
+        id: String(row.insight_id || '').trim(),
+        type: String(row.insight_type || 'single').toLowerCase().trim(),
+        kpiIds: parseKpiIdsList(row.kpi_ids),
+        triggerLogic: String(row.trigger_logic || '').trim(),
+        title: String(row.title || '').trim(),
+        status: String(row.status || 'good').toLowerCase().trim(),
+        summaryTemplate: String(row.summary_template || '').trim(),
+        detailTemplate: String(row.detail_template || '').trim(),
+        recommendations: parseRecommendations(row.recommendations),
+        sectionId: parseInt(row.section_id, 10) || 0,
+        affectedSections: parseIntList(row.affected_sections),
+        formTier: String(row.form_tier || 'onboarding').toLowerCase().trim(),
+        priority: parseInt(row.priority, 10) || 99,
+        active: true
+      }))
+      .filter(rule => rule.id && rule.triggerLogic);
+  } catch (e) {
+    log('Config_Insights sheet not found or empty - using empty list');
+    return [];
+  }
+}
+
+/**
+ * Parse recommendations string (pipe-separated) into array
+ * @param {string} str - Pipe-separated recommendations
+ * @returns {string[]} Array of recommendations (max 5)
+ */
+function parseRecommendations(str) {
+  if (!str) return [];
+  return String(str).split('|').map(s => s.trim()).filter(s => s).slice(0, 5);
+}
+
+/**
+ * Parse comma-separated integer list
+ * @param {string} str - Comma-separated integers
+ * @returns {number[]} Array of integers
+ */
+function parseIntList(str) {
+  if (!str) return [];
+  return String(str).split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+}
+
+/**
+ * Parse comma-separated KPI IDs list
+ * @param {string} str - Comma-separated KPI IDs
+ * @returns {string[]} Array of KPI IDs
+ */
+function parseKpiIdsList(str) {
+  if (!str) return [];
+  return String(str).split(',').map(s => s.trim()).filter(s => s);
 }
 
 /**
@@ -701,6 +769,128 @@ function initializeBenchmarkConfig() {
   );
 
   log('Initialized Config_Benchmarks sheet with direction support');
+}
+
+/**
+ * Create default Config_Insights sheet with sample insight rules
+ */
+function initializeInsightConfig() {
+  const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG_INSIGHTS);
+
+  const headers = [
+    'insight_id', 'insight_type', 'kpi_ids', 'trigger_logic', 'title', 'status',
+    'summary_template', 'detail_template', 'recommendations', 'section_id',
+    'affected_sections', 'form_tier', 'priority', 'active'
+  ];
+
+  const sampleData = [
+    // Single-KPI insights - Booking Performance
+    ['booking_good', 'single', 'booking_rate', 'good+', 'Booking Performance', 'good',
+      'Your booking rate of {value_formatted} is above average.',
+      'Good performance converting leads to appointments.',
+      'Document what\'s working for your CSR team|Consider if you can scale lead volume',
+      2, '', 'onboarding', 10, true],
+
+    ['booking_average', 'single', 'booking_rate', 'average', 'Booking Performance', 'warning',
+      'Your booking rate of {value_formatted} is average.',
+      'There\'s room to improve toward the {benchmark_good}% benchmark.',
+      'Focus on CSR training to improve conversion|Review call handling for improvement opportunities',
+      2, '', 'onboarding', 10, true],
+
+    ['booking_poor', 'single', 'booking_rate', 'poor-', 'Booking Performance', 'concern',
+      'Your booking rate of {value_formatted} is below industry average.',
+      'For every 100 leads, only {value_rounded} become appointments. Industry average is around {benchmark_average}%.',
+      'Review CSR call scripts and training|Analyze why leads aren\'t converting|Consider call monitoring or coaching|Check if leads are being followed up promptly',
+      2, '1', 'onboarding', 5, true],
+
+    // Single-KPI insights - Close Rate
+    ['close_good', 'single', 'close_rate', 'good+', 'Sales Performance', 'good',
+      'Your close rate of {value_formatted} is strong.',
+      'You\'re converting appointments to sales above average.',
+      'Maintain current sales process|Document best practices',
+      3, '', 'onboarding', 10, true],
+
+    ['close_average', 'single', 'close_rate', 'average', 'Sales Performance', 'warning',
+      'Your close rate of {value_formatted} is average.',
+      'Room to improve from {value_rounded}% toward {benchmark_good}%.',
+      'Identify what top performers do differently|Review proposal/quote process',
+      3, '', 'onboarding', 10, true],
+
+    ['close_poor', 'single', 'close_rate', 'poor-', 'Sales Performance', 'concern',
+      'Your close rate of {value_formatted} needs improvement.',
+      'Close rate of {value_rounded}% is below industry average of {benchmark_average}%.',
+      'Review sales process and presentation|Analyze lost opportunities|Consider sales training|Evaluate pricing competitiveness',
+      3, '', 'onboarding', 5, true],
+
+    // Single-KPI insights - Profitability
+    ['profit_good', 'single', 'profit_margin', 'good+', 'Profitability', 'good',
+      'Healthy profit margin of {value_formatted}.',
+      'Strong profitability - maintaining good balance between revenue and costs.',
+      '',
+      7, '', 'onboarding', 10, true],
+
+    ['profit_average', 'single', 'profit_margin', 'average', 'Profitability', 'warning',
+      'Profit margin of {value_formatted} is acceptable but could improve.',
+      'Net profit is acceptable but there\'s room for improvement.',
+      'Look for cost reduction opportunities|Consider premium service offerings',
+      7, '3', 'onboarding', 10, true],
+
+    ['profit_poor', 'single', 'profit_margin', 'poor-', 'Profitability', 'concern',
+      'Profit margin of {value_formatted} is below healthy levels.',
+      'Profitability needs attention - you\'re keeping less than industry average.',
+      'Review pricing - are you undercharging?|Analyze job costs for inefficiencies|Focus on higher-margin services',
+      7, '3', 'onboarding', 5, true],
+
+    // Composite insights - Funnel Analysis
+    ['funnel_leak', 'composite', 'booking_rate,close_rate', 'booking_rate:good+ AND close_rate:poor-', 'Sales Funnel Leak', 'concern',
+      'Marketing is generating leads, but sales isn\'t converting them.',
+      'Booking rate of {booking_rate_formatted} is strong, but close rate of {close_rate_formatted} is below average.',
+      'Focus on sales process, not lead generation|Review why appointments aren\'t closing|Consider sales training',
+      3, '1,2', 'onboarding', 3, true],
+
+    ['funnel_healthy', 'composite', 'booking_rate,close_rate', 'booking_rate:good+ AND close_rate:good+', 'Sales Funnel', 'good',
+      'Healthy sales funnel with strong booking and close rates.',
+      'Both booking rate ({booking_rate_formatted}) and close rate ({close_rate_formatted}) are performing well.',
+      'Maintain current processes|Consider scaling lead volume',
+      3, '1,2', 'onboarding', 15, true]
+  ];
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Delete extra rows to keep sheet clean
+  const lastDataRow = sampleData.length + 1;
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > lastDataRow + 5) {
+    sheet.deleteRows(lastDataRow + 5, maxRows - lastDataRow - 5);
+  }
+
+  // Format header row
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4285f4')
+    .setFontColor('#ffffff');
+
+  for (let i = 1; i <= headers.length; i++) {
+    sheet.autoResizeColumn(i);
+  }
+
+  sheet.setFrozenRows(1);
+
+  // Add explanatory notes
+  const noteRow = sampleData.length + 3;
+  sheet.getRange(noteRow, 1).setValue(
+    'Trigger Logic Reference:'
+  ).setFontWeight('bold');
+  sheet.getRange(noteRow + 1, 1).setValue(
+    'Single: poor-, poor, average, good, good+, excellent, any | Composite: kpi_id:condition AND kpi_id:condition'
+  );
+  sheet.getRange(noteRow + 2, 1).setValue(
+    'Status: good (green), warning (orange), concern (red) | Placeholders: {value}, {value_formatted}, {benchmark_good}, {kpi_id}'
+  );
+
+  log('Initialized Config_Insights sheet with sample insight rules');
 }
 
 /**
