@@ -419,16 +419,23 @@ function getRatingTextColor(rating) {
 // INSIGHTS SECTION
 // ============================================================================
 
+// Severity colors for visibility gaps
+const VISIBILITY_COLORS = {
+  critical: { bg: '#ffcdd2', text: '#b71c1c', icon: '!!' },
+  important: { bg: '#fff3e0', text: '#e65100', icon: '!' },
+  helpful: { bg: '#fff9c4', text: '#f57f17', icon: '~' }
+};
+
 /**
- * Write Insights section
+ * Write Insights section (v2.1 - with visibility gaps and section grouping)
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
  * @param {number} startRow
- * @param {Object[]} insights
+ * @param {Object[]} insights - Legacy format insights array
  * @returns {number} Next row number
  */
 function writeInsightsSection(sheet, startRow, insights) {
   let row = startRow;
-  const colSpan = 8;  // Updated for 8 columns
+  const colSpan = 8;
 
   // Section header
   sheet.getRange(row, 1).setValue('INSIGHTS & FINDINGS');
@@ -447,11 +454,22 @@ function writeInsightsSection(sheet, startRow, insights) {
     return row + 1;
   }
 
-  // Write each insight
-  for (const insight of insights) {
-    // Insight title
+  // Separate visibility gaps from other insights
+  const visibilityGaps = insights.filter(i => i.type === 'visibility_gap');
+  const otherInsights = insights.filter(i => i.type !== 'visibility_gap');
+
+  // Write visibility gaps section first (if any)
+  if (visibilityGaps.length > 0) {
+    row = writeVisibilityGapsSubsection(sheet, row, visibilityGaps, colSpan);
+    row++; // Space after visibility gaps
+  }
+
+  // Write other insights
+  for (const insight of otherInsights) {
+    // Insight title with status
     const statusIcon = getInsightStatusIcon(insight.status);
-    sheet.getRange(row, 1).setValue(`${statusIcon} ${insight.title}`);
+    const statusLabel = insight.status ? ` [${insight.status.toUpperCase()}]` : '';
+    sheet.getRange(row, 1).setValue(`${statusIcon} ${insight.title}${statusLabel}`);
     sheet.getRange(row, 1, 1, colSpan).merge();
     sheet.getRange(row, 1)
       .setFontWeight('bold')
@@ -479,7 +497,7 @@ function writeInsightsSection(sheet, startRow, insights) {
     // Recommendations
     if (insight.recommendations && insight.recommendations.length > 0) {
       for (const rec of insight.recommendations) {
-        sheet.getRange(row, 1).setValue(`  → ${rec}`);
+        sheet.getRange(row, 1).setValue(`  -> ${rec}`);
         sheet.getRange(row, 1, 1, colSpan).merge();
         sheet.getRange(row, 1)
           .setFontColor('#1565c0')
@@ -489,6 +507,317 @@ function writeInsightsSection(sheet, startRow, insights) {
     }
 
     row++; // Space between insights
+  }
+
+  return row;
+}
+
+/**
+ * Write visibility gaps subsection
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} startRow
+ * @param {Object[]} gaps - Visibility gap insights
+ * @param {number} colSpan
+ * @returns {number} Next row number
+ */
+function writeVisibilityGapsSubsection(sheet, startRow, gaps, colSpan) {
+  let row = startRow;
+
+  // Subsection header
+  sheet.getRange(row, 1).setValue('!! OPERATIONAL VISIBILITY GAPS');
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1)
+    .setFontSize(12)
+    .setFontWeight('bold')
+    .setBackground('#ffebee')
+    .setFontColor('#b71c1c');
+  row++;
+
+  // Count by severity for summary
+  const criticalCount = gaps.filter(g => g.status === 'concern').length;
+  const importantCount = gaps.filter(g => g.status === 'warning').length;
+  const helpfulCount = gaps.filter(g => g.status === 'good').length;
+
+  // Write each gap
+  for (const gap of gaps) {
+    // Determine severity from status
+    const severity = gap.status === 'concern' ? 'critical' :
+                     gap.status === 'warning' ? 'important' : 'helpful';
+    const colors = VISIBILITY_COLORS[severity] || VISIBILITY_COLORS.helpful;
+
+    // Gap title with severity icon
+    const severityLabel = severity.charAt(0).toUpperCase() + severity.slice(1);
+    sheet.getRange(row, 1).setValue(`${colors.icon} ${severityLabel}: ${gap.title}`);
+    sheet.getRange(row, 1, 1, colSpan).merge();
+    sheet.getRange(row, 1)
+      .setFontWeight('bold')
+      .setFontSize(10)
+      .setBackground(colors.bg)
+      .setFontColor(colors.text);
+    row++;
+
+    // Gap message
+    sheet.getRange(row, 1).setValue(`   ${gap.summary}`);
+    sheet.getRange(row, 1, 1, colSpan).merge();
+    sheet.getRange(row, 1)
+      .setWrap(true)
+      .setFontSize(10);
+    row++;
+
+    // Recommendation
+    if (gap.recommendations && gap.recommendations.length > 0) {
+      for (const rec of gap.recommendations) {
+        sheet.getRange(row, 1).setValue(`   -> ${rec}`);
+        sheet.getRange(row, 1, 1, colSpan).merge();
+        sheet.getRange(row, 1)
+          .setFontColor('#1565c0')
+          .setFontSize(9);
+        row++;
+      }
+    }
+
+    row++; // Space between gaps
+  }
+
+  // Summary line
+  let summaryParts = [];
+  if (criticalCount > 0) summaryParts.push(`${criticalCount} critical`);
+  if (importantCount > 0) summaryParts.push(`${importantCount} important`);
+  if (helpfulCount > 0) summaryParts.push(`${helpfulCount} helpful`);
+
+  const summaryText = `Visibility Summary: ${summaryParts.join(', ')} metric${gaps.length > 1 ? 's' : ''} missing`;
+  sheet.getRange(row, 1).setValue(summaryText);
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1)
+    .setFontSize(10)
+    .setFontStyle('italic')
+    .setFontColor('#666666')
+    .setBackground('#f5f5f5');
+  row++;
+
+  return row;
+}
+
+/**
+ * Write insights section with full v2.1 format (section-grouped)
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} startRow
+ * @param {Object} allInsights - Result from generateAllInsights()
+ * @param {Object[]} sectionConfig - Section definitions
+ * @returns {number} Next row number
+ */
+function writeInsightsSectionV2(sheet, startRow, allInsights, sectionConfig) {
+  let row = startRow;
+  const colSpan = 8;
+
+  // Main section header
+  sheet.getRange(row, 1).setValue('INSIGHTS & FINDINGS');
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1)
+    .setFontSize(14)
+    .setFontWeight('bold')
+    .setBackground(COLORS.SECTION_HEADER)
+    .setFontColor(COLORS.HEADER_TEXT);
+  row++;
+
+  // 1. Visibility Gaps (if any)
+  if (allInsights.visibilityGaps && allInsights.visibilityGaps.length > 0) {
+    row = writeVisibilityGapsSection(sheet, row, allInsights.visibilityGaps, colSpan);
+    row++; // Separator
+  }
+
+  // 2. Data Quality
+  if (allInsights.dataQuality) {
+    row = writeDataQualitySection(sheet, row, allInsights.dataQuality, colSpan);
+    row++; // Separator
+  }
+
+  // 3. Section-Grouped Insights
+  const groupedInsights = allInsights.groupedInsights || {};
+  const sectionIds = Object.keys(groupedInsights).map(id => parseInt(id)).sort((a, b) => a - b);
+
+  for (const sectionId of sectionIds) {
+    const section = groupedInsights[sectionId];
+    if (!section) continue;
+
+    // Only show sections with insights
+    if (section.insights && section.insights.length > 0) {
+      row = writeSectionInsights(sheet, row, section, colSpan);
+      row++; // Separator between sections
+    }
+  }
+
+  return row;
+}
+
+/**
+ * Write visibility gaps section (v2.1 format)
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} startRow
+ * @param {Object[]} gaps - Visibility gap objects
+ * @param {number} colSpan
+ * @returns {number} Next row number
+ */
+function writeVisibilityGapsSection(sheet, startRow, gaps, colSpan) {
+  let row = startRow;
+
+  // Section header
+  sheet.getRange(row, 1).setValue('!! OPERATIONAL VISIBILITY GAPS');
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1)
+    .setFontSize(12)
+    .setFontWeight('bold')
+    .setBackground('#ffcdd2')
+    .setFontColor('#b71c1c');
+  row++;
+
+  // Write each gap by severity
+  for (const gap of gaps) {
+    const colors = VISIBILITY_COLORS[gap.severity] || VISIBILITY_COLORS.helpful;
+    const severityLabel = gap.severity.charAt(0).toUpperCase() + gap.severity.slice(1);
+
+    // Gap header
+    sheet.getRange(row, 1).setValue(`${colors.icon} ${severityLabel}: ${gap.kpiName} Unknown`);
+    sheet.getRange(row, 1, 1, colSpan).merge();
+    sheet.getRange(row, 1)
+      .setFontWeight('bold')
+      .setFontSize(10)
+      .setBackground(colors.bg)
+      .setFontColor(colors.text);
+    row++;
+
+    // Gap message
+    sheet.getRange(row, 1).setValue(`   ${gap.message}`);
+    sheet.getRange(row, 1, 1, colSpan).merge();
+    sheet.getRange(row, 1).setWrap(true).setFontSize(10);
+    row++;
+
+    // Recommendation
+    if (gap.recommendation) {
+      sheet.getRange(row, 1).setValue(`   -> ${gap.recommendation}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1).setFontColor('#1565c0').setFontSize(9);
+      row++;
+    }
+  }
+
+  // Summary
+  const summary = getVisibilityGapSummary(gaps);
+  sheet.getRange(row, 1).setValue(`Visibility: ${summary.message}`);
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1)
+    .setFontSize(10)
+    .setFontStyle('italic')
+    .setBackground('#f5f5f5');
+  row++;
+
+  return row;
+}
+
+/**
+ * Write data quality section
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} startRow
+ * @param {Object} dataQuality - Data quality insight
+ * @param {number} colSpan
+ * @returns {number} Next row number
+ */
+function writeDataQualitySection(sheet, startRow, dataQuality, colSpan) {
+  let row = startRow;
+
+  // Separator line
+  sheet.getRange(row, 1).setValue('DATA QUALITY');
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1)
+    .setFontSize(11)
+    .setFontWeight('bold')
+    .setBackground('#e3f2fd')
+    .setFontColor('#1565c0');
+  row++;
+
+  // Status and summary
+  const statusIcon = getInsightStatusIcon(dataQuality.status);
+  sheet.getRange(row, 1).setValue(`${statusIcon} ${dataQuality.title}`);
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1)
+    .setFontWeight('bold')
+    .setFontColor(getInsightStatusColor(dataQuality.status));
+  row++;
+
+  sheet.getRange(row, 1).setValue(`  ${dataQuality.summary}`);
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1).setWrap(true);
+  row++;
+
+  return row;
+}
+
+/**
+ * Write insights for a business section
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} startRow
+ * @param {Object} section - Section object with insights
+ * @param {number} colSpan
+ * @returns {number} Next row number
+ */
+function writeSectionInsights(sheet, startRow, section, colSpan) {
+  let row = startRow;
+
+  // Section header with icon
+  const sectionIcon = section.icon || '';
+  const headerText = sectionIcon ?
+    `${sectionIcon} ${section.sectionName.toUpperCase()} (Section ${section.sectionId})` :
+    `${section.sectionName.toUpperCase()} (Section ${section.sectionId})`;
+
+  sheet.getRange(row, 1).setValue(headerText);
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1)
+    .setFontSize(11)
+    .setFontWeight('bold')
+    .setBackground('#e8eaf6')
+    .setFontColor('#3949ab');
+  row++;
+
+  // Write each insight in this section
+  for (const insight of section.insights) {
+    const statusIcon = getInsightStatusIcon(insight.status);
+    const statusLabel = ` [${insight.status.toUpperCase()}]`;
+
+    // Title
+    sheet.getRange(row, 1).setValue(`${statusIcon} ${insight.title}${statusLabel}`);
+    sheet.getRange(row, 1, 1, colSpan).merge();
+    sheet.getRange(row, 1)
+      .setFontWeight('bold')
+      .setFontSize(10)
+      .setFontColor(getInsightStatusColor(insight.status));
+    row++;
+
+    // Summary
+    sheet.getRange(row, 1).setValue(`  ${insight.summary}`);
+    sheet.getRange(row, 1, 1, colSpan).merge();
+    sheet.getRange(row, 1).setWrap(true);
+    row++;
+
+    // Detail (if present and different)
+    if (insight.detail && insight.detail !== insight.summary) {
+      sheet.getRange(row, 1).setValue(`  ${insight.detail}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1)
+        .setWrap(true)
+        .setFontColor('#666666')
+        .setFontSize(9);
+      row++;
+    }
+
+    // Recommendations
+    if (insight.recommendations && insight.recommendations.length > 0) {
+      for (const rec of insight.recommendations) {
+        sheet.getRange(row, 1).setValue(`  -> ${rec}`);
+        sheet.getRange(row, 1, 1, colSpan).merge();
+        sheet.getRange(row, 1).setFontColor('#1565c0').setFontSize(9);
+        row++;
+      }
+    }
   }
 
   return row;

@@ -3,82 +3,156 @@
  * Generate plain-English findings and recommendations
  *
  * ShopFloor Solutions - Operational KPI Calculator
+ * v2.1 - Modular config-driven insights with visibility gap detection
  */
 
 // ============================================================================
-// BENCHMARK THRESHOLDS
+// SECTION ICONS
 // ============================================================================
-// Note: Benchmarks are loaded from Config_Benchmarks sheet via loadBenchmarkConfig()
-// in Config.gs. The getDefaultBenchmarks() function in Config.gs provides fallbacks
-// if the sheet is missing or empty.
+
+const SECTION_ICONS = {
+  1: { icon: '', name: 'Marketing' },
+  2: { icon: '', name: 'CSR/Call Center' },
+  3: { icon: '', name: 'Sales' },
+  4: { icon: '', name: 'Field Operations' },
+  5: { icon: '', name: 'Scheduling/Dispatch' },
+  6: { icon: '', name: 'Inventory/Warehouse' },
+  7: { icon: '', name: 'Finance/Accounting' },
+  8: { icon: '', name: 'HR/Training' },
+  9: { icon: '', name: 'Management' }
+};
 
 // ============================================================================
 // MAIN INSIGHTS GENERATION
 // ============================================================================
 
 /**
- * Generate all insights for a client
+ * Generate all insights for a client (v2.1 - new main entry point)
+ * Returns structured object with visibility gaps, data quality, and section-grouped insights
+ *
+ * @param {Object} clientData - Client data object
+ * @param {Object} allValues - All KPI values (raw + calculated)
+ * @param {Object} kpiRatings - Ratings keyed by kpiId {kpiId: {rating, value, benchmark}}
+ * @param {Object[]} validationIssues - Validation issues array
+ * @param {Object[]} kpiConfig - KPI definitions
+ * @param {Object[]} insightConfig - Insight rules from Config_Insights
+ * @param {Object[]} sectionConfig - Section definitions
+ * @param {Object} benchmarks - Benchmarks keyed by kpiId
+ * @returns {Object} {visibilityGaps, dataQuality, groupedInsights}
+ */
+function generateAllInsights(clientData, allValues, kpiRatings, validationIssues, kpiConfig, insightConfig, sectionConfig, benchmarks) {
+  // 1. Generate visibility gap insights
+  const visibilityGaps = generateVisibilityGapInsights(allValues, kpiConfig);
+
+  // 2. Generate data quality insight
+  const dataQuality = generateDataQualityInsight(validationIssues, kpiConfig);
+
+  // 3. Generate config-driven insights
+  const insights = generateConfigInsights(clientData, allValues, kpiRatings, insightConfig, kpiConfig, benchmarks);
+
+  // 4. Group insights by section
+  const groupedInsights = groupInsightsBySection(insights, sectionConfig);
+
+  return {
+    visibilityGaps,
+    dataQuality,
+    groupedInsights
+  };
+}
+
+/**
+ * Generate insights (backward-compatible wrapper)
  * @param {Object} clientData - Client data object
  * @param {Object} allValues - Raw + calculated KPIs
  * @param {Object[]} validationIssues - Validation issues
  * @param {Object[]} kpiConfig - KPI definitions
  * @param {Object[]} sectionConfig - Section definitions
- * @returns {Object[]} Array of insight objects
+ * @returns {Object[]} Array of insight objects (legacy format)
  */
 function generateInsights(clientData, allValues, validationIssues, kpiConfig, sectionConfig) {
   const insights = [];
 
-  // Load benchmarks (with industry and state filters if available)
+  // Load benchmarks and insight config
   const benchmarks = loadBenchmarksForInsights(clientData.industry, clientData.state);
+  const insightConfig = loadInsightConfig();
 
-  // 1. Data Quality insight (always first)
-  const dataQualityInsight = generateDataQualityInsight(validationIssues, kpiConfig);
-  if (dataQualityInsight) {
-    insights.push(dataQualityInsight);
+  // Build kpiRatings object
+  const kpiRatings = buildKPIRatings(allValues, kpiConfig, benchmarks);
+
+  // Get all insights using new system
+  const allInsights = generateAllInsights(
+    clientData, allValues, kpiRatings, validationIssues,
+    kpiConfig, insightConfig, sectionConfig, benchmarks
+  );
+
+  // Convert to legacy format (flat array)
+  // 1. Add visibility gaps as insights
+  for (const gap of allInsights.visibilityGaps) {
+    insights.push({
+      type: 'visibility_gap',
+      title: `${gap.kpiName} Unknown`,
+      status: gap.severity === 'critical' ? 'concern' : (gap.severity === 'important' ? 'warning' : 'good'),
+      summary: gap.message,
+      detail: `This is a ${gap.severity} operational visibility gap.`,
+      affectedSections: [],
+      recommendations: gap.recommendation ? [gap.recommendation] : []
+    });
   }
 
-  // 2. Booking Performance insight
-  const bookingInsight = generateBookingInsight(allValues, benchmarks);
-  if (bookingInsight) {
-    insights.push(bookingInsight);
+  // 2. Add data quality insight
+  if (allInsights.dataQuality) {
+    insights.push(allInsights.dataQuality);
   }
 
-  // 3. Sales Performance insight
-  const salesInsight = generateSalesInsight(allValues, benchmarks);
-  if (salesInsight) {
-    insights.push(salesInsight);
-  }
-
-  // 4. Profitability insight
-  const profitInsight = generateProfitabilityInsight(allValues, benchmarks);
-  if (profitInsight) {
-    insights.push(profitInsight);
-  }
-
-  // 5. Capacity Utilization insight
-  const capacityInsight = generateCapacityInsight(allValues, benchmarks);
-  if (capacityInsight) {
-    insights.push(capacityInsight);
-  }
-
-  // 6. Vehicle/Crew Efficiency insight
-  const efficiencyInsight = generateEfficiencyInsight(allValues, clientData);
-  if (efficiencyInsight) {
-    insights.push(efficiencyInsight);
-  }
-
-  // 7. Problem Sections summary
-  const sectionInsight = generateSectionInsight(validationIssues, allValues, kpiConfig, sectionConfig);
-  if (sectionInsight) {
-    insights.push(sectionInsight);
+  // 3. Add all section insights
+  for (const sectionId of Object.keys(allInsights.groupedInsights)) {
+    const section = allInsights.groupedInsights[sectionId];
+    for (const insight of section.insights) {
+      insights.push({
+        type: insight.id,
+        title: insight.title,
+        status: insight.status,
+        summary: insight.summary,
+        detail: insight.detail,
+        affectedSections: [parseInt(sectionId)],
+        recommendations: insight.recommendations || []
+      });
+    }
   }
 
   return insights;
 }
 
 /**
+ * Build KPI ratings object from values and benchmarks
+ * @param {Object} allValues - All KPI values
+ * @param {Object[]} kpiConfig - KPI definitions
+ * @param {Object} benchmarks - Benchmarks keyed by kpiId
+ * @returns {Object} Ratings keyed by kpiId
+ */
+function buildKPIRatings(allValues, kpiConfig, benchmarks) {
+  const kpiRatings = {};
+
+  for (const kpi of kpiConfig) {
+    const value = allValues[kpi.id];
+    const benchmark = benchmarks[kpi.id];
+
+    if (benchmark && !isEmpty(value)) {
+      const rating = getRating(value, benchmark, benchmark.direction || 'higher');
+      kpiRatings[kpi.id] = {
+        rating: rating,
+        value: value,
+        benchmark: benchmark
+      };
+    }
+  }
+
+  return kpiRatings;
+}
+
+/**
  * Load benchmarks for insights from Config.gs
- * Now includes direction field for proper rating logic
+ * Includes direction field for proper rating logic
  * @param {string} industry - Client industry
  * @param {string} state - Client state/province
  * @returns {Object} Benchmarks object keyed by kpiId
@@ -86,33 +160,122 @@ function generateInsights(clientData, allValues, validationIssues, kpiConfig, se
 function loadBenchmarksForInsights(industry, state) {
   const benchmarks = {};
 
-  // Load from config with priority matching (includes fallback to defaults in Config.gs)
   try {
     const configBenchmarks = loadBenchmarkConfig(industry, state);
 
     for (const benchmark of configBenchmarks) {
-      // Only keep the best match for each KPI (first occurrence wins)
       if (!benchmarks[benchmark.kpiId]) {
         benchmarks[benchmark.kpiId] = {
           poor: benchmark.poor,
           average: benchmark.average,
           good: benchmark.good,
           excellent: benchmark.excellent,
-          direction: benchmark.direction || 'higher'  // Include direction for getRating()
+          direction: benchmark.direction || 'higher'
         };
       }
     }
   } catch (e) {
     log('Error loading benchmarks: ' + e.message);
-    // loadBenchmarkConfig already returns defaults on failure,
-    // but handle complete failure gracefully
   }
 
   return benchmarks;
 }
 
 // ============================================================================
-// INDIVIDUAL INSIGHT GENERATORS
+// VISIBILITY GAP DETECTION
+// ============================================================================
+
+/**
+ * Generate visibility gap insights for missing critical/important inputs
+ * @param {Object} allValues - All KPI values
+ * @param {Object[]} kpiConfig - KPI definitions with visibility flags
+ * @returns {Object[]} Array of visibility gap objects
+ */
+function generateVisibilityGapInsights(allValues, kpiConfig) {
+  const gaps = [];
+
+  // Only check input KPIs with visibility flags
+  const flaggedInputs = kpiConfig.filter(k =>
+    k.type === 'input' &&
+    k.visibilityFlag &&
+    k.active === true
+  );
+
+  for (const kpi of flaggedInputs) {
+    const value = allValues[kpi.id];
+
+    // Check if value is missing (null, undefined, empty, or NaN)
+    if (isValueMissing(value)) {
+      gaps.push({
+        kpiId: kpi.id,
+        kpiName: kpi.name,
+        severity: kpi.visibilityFlag,  // critical, important, helpful
+        message: kpi.missingMessage || `You don't know your ${kpi.name.toLowerCase()}`,
+        recommendation: kpi.missingRecommendation || 'Start tracking this metric'
+      });
+    }
+  }
+
+  // Sort by severity (critical first, then important, then helpful)
+  const severityOrder = { critical: 1, important: 2, helpful: 3 };
+  gaps.sort((a, b) => (severityOrder[a.severity] || 99) - (severityOrder[b.severity] || 99));
+
+  return gaps;
+}
+
+/**
+ * Check if a value is considered "missing"
+ * @param {any} value - Value to check
+ * @returns {boolean} True if value is missing
+ */
+function isValueMissing(value) {
+  if (value === null || value === undefined || value === '') return true;
+  if (typeof value === 'number' && isNaN(value)) return true;
+  return false;
+}
+
+/**
+ * Get visibility gap summary
+ * @param {Object[]} gaps - Visibility gap objects
+ * @returns {Object} Summary with counts and message
+ */
+function getVisibilityGapSummary(gaps) {
+  const critical = gaps.filter(g => g.severity === 'critical').length;
+  const important = gaps.filter(g => g.severity === 'important').length;
+  const helpful = gaps.filter(g => g.severity === 'helpful').length;
+
+  const total = critical + important + helpful;
+
+  if (total === 0) {
+    return {
+      hasGaps: false,
+      message: 'All visibility metrics are being tracked.',
+      critical: 0,
+      important: 0,
+      helpful: 0
+    };
+  }
+
+  let message = '';
+  if (critical > 0) {
+    message = `${critical} critical metric${critical > 1 ? 's' : ''} missing - address visibility gaps first.`;
+  } else if (important > 0) {
+    message = `${important} important metric${important > 1 ? 's' : ''} missing.`;
+  } else {
+    message = `${helpful} helpful metric${helpful > 1 ? 's' : ''} not tracked.`;
+  }
+
+  return {
+    hasGaps: true,
+    message: message,
+    critical: critical,
+    important: important,
+    helpful: helpful
+  };
+}
+
+// ============================================================================
+// DATA QUALITY INSIGHT
 // ============================================================================
 
 /**
@@ -167,404 +330,313 @@ function generateDataQualityInsight(validationIssues, kpiConfig) {
   };
 }
 
-/**
- * Generate insight about booking performance
- * @param {Object} allValues
- * @param {Object} benchmarks
- * @returns {Object|null}
- */
-function generateBookingInsight(allValues, benchmarks) {
-  const bookingRate = allValues.booking_rate;
-  const totalLeads = allValues.total_leads;
-  const visits = allValues.in_home_visits;
-
-  if (isEmpty(bookingRate)) {
-    return null;
-  }
-
-  const benchmark = benchmarks.booking_rate || { poor: 30, average: 50, good: 70, excellent: 85, direction: 'higher' };
-  const rating = getRating(bookingRate, benchmark, benchmark.direction || 'higher');
-
-  let status, summary, detail;
-  const recommendations = [];
-
-  if (rating === 'poor') {
-    status = 'concern';
-    summary = `Your booking rate of ${formatPercentage(bookingRate)} is below industry average.`;
-    detail = `For every 100 leads, only ${Math.round(bookingRate)} become appointments. ` +
-      `Industry average is around ${benchmark.average}%.`;
-    recommendations.push('Review CSR call scripts and training');
-    recommendations.push('Analyze why leads aren\'t converting to appointments');
-    recommendations.push('Consider implementing call monitoring or coaching');
-    recommendations.push('Check if leads are being followed up promptly');
-  } else if (rating === 'average') {
-    status = 'warning';
-    summary = `Your booking rate of ${formatPercentage(bookingRate)} is average.`;
-    detail = `There's room to improve from ${bookingRate.toFixed(1)}% toward the ${benchmark.good}% benchmark.`;
-    recommendations.push('Focus on CSR training to improve conversion');
-    recommendations.push('Review call handling for improvement opportunities');
-  } else if (rating === 'good') {
-    status = 'good';
-    summary = `Your booking rate of ${formatPercentage(bookingRate)} is above average.`;
-    detail = `Good performance converting leads to appointments.`;
-    recommendations.push('Document what\'s working for your CSR team');
-    recommendations.push('Consider if you can scale lead volume');
-  } else {
-    status = 'good';
-    summary = `Excellent booking rate of ${formatPercentage(bookingRate)}!`;
-    detail = `You're converting leads to appointments at a top-tier rate.`;
-  }
-
-  return {
-    type: 'booking',
-    title: 'Booking Performance',
-    status: status,
-    summary: summary,
-    detail: detail,
-    affectedSections: [1, 2], // Marketing, CSR
-    recommendations: recommendations
-  };
-}
+// ============================================================================
+// CONFIG-DRIVEN INSIGHTS
+// ============================================================================
 
 /**
- * Generate insight about sales performance
- * @param {Object} allValues
- * @param {Object} benchmarks
- * @returns {Object|null}
+ * Generate insights based on Config_Insights rules
+ * @param {Object} clientData - Client data
+ * @param {Object} allValues - All KPI values
+ * @param {Object} kpiRatings - Ratings keyed by kpiId
+ * @param {Object[]} insightConfig - Insight rules
+ * @param {Object[]} kpiConfig - KPI definitions
+ * @param {Object} benchmarks - Benchmarks keyed by kpiId
+ * @returns {Object[]} Array of triggered insights
  */
-function generateSalesInsight(allValues, benchmarks) {
-  const closeRate = allValues.close_rate;
-  const visits = allValues.in_home_visits;
-  const jobsClosed = allValues.jobs_closed;
-  const avgTicket = allValues.calculated_avg_ticket || allValues.average_ticket;
+function generateConfigInsights(clientData, allValues, kpiRatings, insightConfig, kpiConfig, benchmarks) {
+  const triggeredInsights = [];
 
-  if (isEmpty(closeRate)) {
-    return null;
-  }
-
-  const benchmark = benchmarks.close_rate || { poor: 20, average: 35, good: 50, excellent: 65, direction: 'higher' };
-  const rating = getRating(closeRate, benchmark, benchmark.direction || 'higher');
-
-  let status, summary, detail;
-  const recommendations = [];
-
-  if (rating === 'poor') {
-    status = 'concern';
-    summary = `Your close rate of ${formatPercentage(closeRate)} needs improvement.`;
-    detail = `Of ${visits || 'your'} appointments, only ${closeRate.toFixed(1)}% convert to sales. ` +
-      `Industry average is ${benchmark.average}%.`;
-    recommendations.push('Review sales process and presentation');
-    recommendations.push('Analyze lost opportunities - why aren\'t customers buying?');
-    recommendations.push('Consider sales training or coaching');
-    recommendations.push('Evaluate pricing competitiveness');
-  } else if (rating === 'average') {
-    status = 'warning';
-    summary = `Your close rate of ${formatPercentage(closeRate)} is average.`;
-    detail = `Room to improve from ${closeRate.toFixed(1)}% toward ${benchmark.good}%.`;
-    recommendations.push('Identify what top performers do differently');
-    recommendations.push('Review proposal/quote process');
-  } else if (rating === 'good') {
-    status = 'good';
-    summary = `Your close rate of ${formatPercentage(closeRate)} is strong.`;
-    detail = `You're converting appointments to sales above average.`;
-    if (!isEmpty(avgTicket)) {
-      recommendations.push(`With ${formatCurrency(avgTicket)} average ticket, focus on maintaining quality`);
+  for (const rule of insightConfig) {
+    // Check if all required KPIs have ratings (for single-KPI) or values (for composite)
+    if (rule.type === 'single') {
+      const kpiId = rule.kpiIds[0];
+      if (!kpiRatings[kpiId]?.rating) continue;
+    } else if (rule.type === 'composite') {
+      // For composite, check if all referenced KPIs have ratings
+      const hasAllRatings = rule.kpiIds.every(id => kpiRatings[id]?.rating);
+      if (!hasAllRatings) continue;
     }
-  } else {
-    status = 'good';
-    summary = `Excellent close rate of ${formatPercentage(closeRate)}!`;
-    detail = `Top-tier sales conversion. Keep doing what you're doing.`;
+
+    // Evaluate trigger condition
+    if (!evaluateTrigger(rule.triggerLogic, kpiRatings, rule.type)) continue;
+
+    // Build template context
+    const context = buildTemplateContext(rule, allValues, kpiRatings, benchmarks, kpiConfig, clientData);
+
+    // Generate insight
+    triggeredInsights.push({
+      id: rule.id,
+      title: rule.title,
+      status: rule.status,
+      summary: replaceTemplatePlaceholders(rule.summaryTemplate, context),
+      detail: replaceTemplatePlaceholders(rule.detailTemplate, context),
+      recommendations: rule.recommendations,
+      sectionId: rule.sectionId,
+      affectedSections: rule.affectedSections,
+      priority: rule.priority
+    });
   }
 
-  return {
-    type: 'sales',
-    title: 'Sales Performance',
-    status: status,
-    summary: summary,
-    detail: detail,
-    affectedSections: [3], // Sales
-    recommendations: recommendations
-  };
+  return triggeredInsights;
+}
+
+// ============================================================================
+// TRIGGER EVALUATION
+// ============================================================================
+
+/**
+ * Evaluate trigger logic against KPI ratings
+ * @param {string} triggerLogic - Trigger logic string
+ * @param {Object} kpiRatings - Ratings keyed by kpiId
+ * @param {string} insightType - 'single' or 'composite'
+ * @returns {boolean} True if trigger condition is met
+ */
+function evaluateTrigger(triggerLogic, kpiRatings, insightType) {
+  if (!triggerLogic) return false;
+
+  if (insightType === 'single' || !triggerLogic.includes(' AND ')) {
+    // Simple single-KPI trigger
+    // For single type, find the first KPI that has a rating
+    const kpiIds = Object.keys(kpiRatings);
+    for (const kpiId of kpiIds) {
+      if (kpiRatings[kpiId]?.rating) {
+        return matchesRatingCondition(kpiRatings[kpiId].rating, triggerLogic);
+      }
+    }
+    return false;
+  }
+
+  // Composite trigger: split on AND
+  const conditions = triggerLogic.split(/\s+AND\s+/i);
+
+  // ALL conditions must be true
+  for (const condition of conditions) {
+    const colonIndex = condition.indexOf(':');
+    if (colonIndex === -1) continue;
+
+    const kpiId = condition.substring(0, colonIndex).trim();
+    const ratingCondition = condition.substring(colonIndex + 1).trim();
+    const actualRating = kpiRatings[kpiId]?.rating;
+
+    if (!matchesRatingCondition(actualRating, ratingCondition)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
- * Generate insight about profitability
- * @param {Object} allValues
- * @param {Object} benchmarks
- * @returns {Object|null}
+ * Check if actual rating matches a rating condition
+ * @param {string} actual - Actual rating (critical, poor, average, good, excellent)
+ * @param {string} condition - Condition (e.g., 'good+', 'poor-', 'average', 'any')
+ * @returns {boolean} True if matches
  */
-function generateProfitabilityInsight(allValues, benchmarks) {
-  const profitMargin = allValues.profit_margin;
-  const netProfit = allValues.net_profit;
-  const grossRevenue = allValues.gross_revenue;
-  const totalCosts = allValues.total_costs;
+function matchesRatingCondition(actual, condition) {
+  const ratingOrder = { critical: 1, poor: 2, average: 3, good: 4, excellent: 5 };
+  const actualOrder = ratingOrder[actual?.toLowerCase()];
 
-  if (isEmpty(profitMargin)) {
-    return null;
+  if (!actualOrder) return false;
+  if (condition === 'any') return true;
+
+  // Handle range conditions
+  if (condition.endsWith('-')) {
+    // poor- means poor or worse (poor, critical)
+    const baseRating = condition.slice(0, -1);
+    return actualOrder <= ratingOrder[baseRating];
   }
 
-  const benchmark = benchmarks.profit_margin || { poor: 5, average: 12, good: 20, excellent: 30, direction: 'higher' };
+  if (condition.endsWith('+')) {
+    // good+ means good or better (good, excellent)
+    const baseRating = condition.slice(0, -1);
+    return actualOrder >= ratingOrder[baseRating];
+  }
 
-  let status, summary, detail;
-  const recommendations = [];
+  // Exact match
+  return actual?.toLowerCase() === condition.toLowerCase();
+}
 
-  // Handle negative profit
-  if (profitMargin < 0) {
-    status = 'concern';
-    summary = `You're operating at a loss with ${formatPercentage(profitMargin)} margin.`;
-    detail = `Costs of ${formatCurrency(totalCosts)} exceed revenue of ${formatCurrency(grossRevenue)}.`;
-    recommendations.push('Immediate review of pricing strategy required');
-    recommendations.push('Analyze cost structure for reduction opportunities');
-    recommendations.push('Identify unprofitable job types or customers');
-    recommendations.push('Consider pausing growth to fix profitability first');
+// ============================================================================
+// TEMPLATE SYSTEM
+// ============================================================================
 
-    return {
-      type: 'profitability',
-      title: 'Profitability',
-      status: status,
-      summary: summary,
-      detail: detail,
-      affectedSections: [3, 7], // Sales, Finance
-      recommendations: recommendations
+/**
+ * Build template context for placeholder replacement
+ * @param {Object} rule - Insight rule
+ * @param {Object} allValues - All KPI values
+ * @param {Object} kpiRatings - Ratings keyed by kpiId
+ * @param {Object} benchmarks - Benchmarks keyed by kpiId
+ * @param {Object[]} kpiConfig - KPI definitions
+ * @param {Object} clientData - Client data
+ * @returns {Object} Context object for template replacement
+ */
+function buildTemplateContext(rule, allValues, kpiRatings, benchmarks, kpiConfig, clientData) {
+  const context = {
+    // Universal placeholders
+    company_name: clientData.companyName || '',
+    industry: clientData.industry || '',
+    state: clientData.state || ''
+  };
+
+  // For single-KPI insights
+  if (rule.type === 'single' && rule.kpiIds.length > 0) {
+    const kpiId = rule.kpiIds[0];
+    const value = allValues[kpiId];
+    const rating = kpiRatings[kpiId];
+    const benchmark = benchmarks[kpiId];
+    const kpiDef = kpiConfig.find(k => k.id === kpiId);
+
+    context.value = value;
+    context.value_formatted = formatValueForInsight(value, kpiDef?.dataType);
+    context.value_rounded = Math.round(value || 0);
+    context.kpi_name = kpiDef?.name || snakeToTitleCase(kpiId);
+    context.rating = rating?.rating ? capitalizeFirst(rating.rating) : 'N/A';
+
+    if (benchmark) {
+      context.benchmark_poor = benchmark.poor;
+      context.benchmark_average = benchmark.average;
+      context.benchmark_good = benchmark.good;
+      context.benchmark_excellent = benchmark.excellent;
+    }
+  }
+
+  // For composite insights - add all KPI values
+  if (rule.type === 'composite') {
+    for (const kpiId of rule.kpiIds) {
+      const value = allValues[kpiId];
+      const rating = kpiRatings[kpiId];
+      const benchmark = benchmarks[kpiId];
+      const kpiDef = kpiConfig.find(k => k.id === kpiId);
+
+      // Add with kpiId prefix
+      context[kpiId] = value;
+      context[`${kpiId}_formatted`] = formatValueForInsight(value, kpiDef?.dataType);
+      context[`${kpiId}_rounded`] = Math.round(value || 0);
+      context[`${kpiId}_rating`] = rating?.rating ? capitalizeFirst(rating.rating) : 'N/A';
+      context[`${kpiId}_name`] = kpiDef?.name || snakeToTitleCase(kpiId);
+
+      if (benchmark) {
+        context[`${kpiId}_benchmark_poor`] = benchmark.poor;
+        context[`${kpiId}_benchmark_average`] = benchmark.average;
+        context[`${kpiId}_benchmark_good`] = benchmark.good;
+        context[`${kpiId}_benchmark_excellent`] = benchmark.excellent;
+      }
+    }
+  }
+
+  return context;
+}
+
+/**
+ * Replace template placeholders with actual values
+ * @param {string} template - Template string with {placeholders}
+ * @param {Object} context - Context object with values
+ * @returns {string} Processed string
+ */
+function replaceTemplatePlaceholders(template, context) {
+  if (!template) return '';
+
+  return template.replace(/\{([^}]+)\}/g, (match, key) => {
+    const value = context[key];
+    if (value !== undefined && value !== null) {
+      return String(value);
+    }
+    return match; // Keep placeholder if not found
+  });
+}
+
+/**
+ * Format value for insight display
+ * @param {any} value - Value to format
+ * @param {string} dataType - Data type
+ * @returns {string} Formatted value
+ */
+function formatValueForInsight(value, dataType) {
+  if (value === null || value === undefined || isNaN(value)) {
+    return 'N/A';
+  }
+
+  switch (dataType) {
+    case 'currency':
+      return formatCurrency(value);
+    case 'percentage':
+      return formatPercentage(value);
+    case 'integer':
+      return Math.round(value).toLocaleString();
+    default:
+      return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  }
+}
+
+// ============================================================================
+// SECTION GROUPING
+// ============================================================================
+
+/**
+ * Group insights by section and sort within each group
+ * @param {Object[]} insights - Array of triggered insights
+ * @param {Object[]} sectionConfig - Section definitions
+ * @returns {Object} Insights grouped by sectionId
+ */
+function groupInsightsBySection(insights, sectionConfig) {
+  const grouped = {};
+
+  // Initialize all sections
+  for (const section of sectionConfig) {
+    grouped[section.sectionId] = {
+      sectionId: section.sectionId,
+      sectionName: section.sectionName,
+      icon: getSectionIcon(section.sectionId),
+      insights: []
     };
   }
 
-  const rating = getRating(profitMargin, benchmark, benchmark.direction || 'higher');
-
-  if (rating === 'poor') {
-    status = 'concern';
-    summary = `Profit margin of ${formatPercentage(profitMargin)} is below healthy levels.`;
-    detail = `You're keeping only ${formatCurrency(netProfit)} from ${formatCurrency(grossRevenue)} revenue.`;
-    recommendations.push('Review pricing - are you undercharging?');
-    recommendations.push('Analyze job costs for inefficiencies');
-    recommendations.push('Focus on higher-margin services');
-  } else if (rating === 'average') {
-    status = 'warning';
-    summary = `Profit margin of ${formatPercentage(profitMargin)} is acceptable but could improve.`;
-    detail = `Net profit of ${formatCurrency(netProfit)} on ${formatCurrency(grossRevenue)} revenue.`;
-    recommendations.push('Look for cost reduction opportunities');
-    recommendations.push('Consider premium service offerings');
-  } else if (rating === 'good') {
-    status = 'good';
-    summary = `Healthy profit margin of ${formatPercentage(profitMargin)}.`;
-    detail = `Generating ${formatCurrency(netProfit)} profit on ${formatCurrency(grossRevenue)} revenue.`;
-  } else {
-    status = 'good';
-    summary = `Excellent profit margin of ${formatPercentage(profitMargin)}!`;
-    detail = `Strong profitability - ${formatCurrency(netProfit)} on ${formatCurrency(grossRevenue)}.`;
+  // Assign insights to sections
+  for (const insight of insights) {
+    if (grouped[insight.sectionId]) {
+      grouped[insight.sectionId].insights.push(insight);
+    }
   }
 
-  return {
-    type: 'profitability',
-    title: 'Profitability',
-    status: status,
-    summary: summary,
-    detail: detail,
-    affectedSections: [3, 7], // Sales, Finance
-    recommendations: recommendations
-  };
+  // Sort insights within each section: concerns first, then warnings, then good
+  const statusOrder = { concern: 1, warning: 2, good: 3 };
+  for (const sectionId of Object.keys(grouped)) {
+    grouped[sectionId].insights.sort((a, b) => {
+      const statusDiff = (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99);
+      if (statusDiff !== 0) return statusDiff;
+      return (a.priority || 99) - (b.priority || 99);
+    });
+  }
+
+  return grouped;
 }
 
 /**
- * Generate insight about capacity utilization
- * @param {Object} allValues
- * @param {Object} benchmarks
- * @returns {Object|null}
+ * Get icon for a section
+ * @param {number} sectionId - Section ID
+ * @returns {string} Section icon
  */
-function generateCapacityInsight(allValues, benchmarks) {
-  const scheduleEfficiency = allValues.schedule_efficiency;
-  const scheduleCapacity = allValues.schedule_capacity;
-  const hoursScheduled = allValues.hours_scheduled;
-
-  if (isEmpty(scheduleEfficiency)) {
-    return null;
-  }
-
-  const benchmark = benchmarks.schedule_efficiency || { poor: 60, average: 80, good: 95, excellent: 100 };
-
-  let status, summary, detail;
-  const recommendations = [];
-
-  if (scheduleEfficiency > 100) {
-    status = 'warning';
-    summary = `Schedule efficiency of ${formatPercentage(scheduleEfficiency)} indicates overtime.`;
-    detail = `You're scheduling ${formatValue(hoursScheduled, 'number')} hours against ` +
-      `${formatValue(scheduleCapacity, 'number')} capacity.`;
-    recommendations.push('Evaluate if overtime is sustainable');
-    recommendations.push('Consider hiring additional technicians');
-    recommendations.push('Review if capacity calculation is accurate');
-  } else if (scheduleEfficiency < benchmark.poor) {
-    status = 'concern';
-    summary = `Low schedule efficiency of ${formatPercentage(scheduleEfficiency)}.`;
-    detail = `Only using ${scheduleEfficiency.toFixed(1)}% of available capacity.`;
-    recommendations.push('Review scheduling practices');
-    recommendations.push('Analyze why capacity is underutilized');
-    recommendations.push('Marketing may need to generate more demand');
-    recommendations.push('Consider reducing staff if demand is consistently low');
-  } else if (scheduleEfficiency < benchmark.average) {
-    status = 'warning';
-    summary = `Schedule efficiency of ${formatPercentage(scheduleEfficiency)} has room to improve.`;
-    detail = `Using ${scheduleEfficiency.toFixed(1)}% of ${formatValue(scheduleCapacity, 'number')} available hours.`;
-    recommendations.push('Work to fill schedule gaps');
-    recommendations.push('Review routing and job duration estimates');
-  } else {
-    status = 'good';
-    summary = `Good schedule efficiency of ${formatPercentage(scheduleEfficiency)}.`;
-    detail = `Effectively utilizing technician capacity.`;
-  }
-
-  return {
-    type: 'capacity',
-    title: 'Capacity Utilization',
-    status: status,
-    summary: summary,
-    detail: detail,
-    affectedSections: [4, 5], // Field Operations, Scheduling
-    recommendations: recommendations
-  };
+function getSectionIcon(sectionId) {
+  return SECTION_ICONS[sectionId]?.icon || '';
 }
 
 /**
- * Generate insight about vehicle/crew efficiency
- * @param {Object} allValues
- * @param {Object} clientData
- * @returns {Object|null}
+ * Get section display name with icon
+ * @param {number} sectionId - Section ID
+ * @param {Object[]} sectionConfig - Section definitions
+ * @returns {string} Display name with icon
  */
-function generateEfficiencyInsight(allValues, clientData) {
-  const revenuePerVehicle = allValues.revenue_per_vehicle;
-  const revenuePerTech = allValues.revenue_per_tech;
-  const numVehicles = allValues.num_vehicles;
-  const numTechs = allValues.num_techs;
-  const periodDays = clientData.periodDays || 30;
-
-  // Need at least one metric
-  if (isEmpty(revenuePerVehicle) && isEmpty(revenuePerTech)) {
-    return null;
-  }
-
-  let summary = '';
-  let detail = '';
-  const recommendations = [];
-
-  // Calculate daily revenue per asset
-  if (!isEmpty(revenuePerVehicle)) {
-    const dailyPerVehicle = revenuePerVehicle / periodDays;
-    summary += `Revenue per vehicle: ${formatCurrency(revenuePerVehicle)} (${formatCurrency(dailyPerVehicle)}/day). `;
-  }
-
-  if (!isEmpty(revenuePerTech)) {
-    const dailyPerTech = revenuePerTech / periodDays;
-    detail += `Revenue per technician: ${formatCurrency(revenuePerTech)} (${formatCurrency(dailyPerTech)}/day). `;
-  }
-
-  // General recommendations
-  recommendations.push('Compare these metrics month-over-month to track trends');
-
-  if (!isEmpty(revenuePerVehicle) && revenuePerVehicle < 30000) {
-    recommendations.push('Consider if you have too many vehicles for current demand');
-  }
-
-  if (!isEmpty(revenuePerTech) && revenuePerTech < 25000) {
-    recommendations.push('Review technician productivity and job routing');
-  }
-
-  return {
-    type: 'efficiency',
-    title: 'Asset Efficiency',
-    status: 'good', // This is informational
-    summary: summary.trim(),
-    detail: detail.trim() || 'Track these metrics over time to identify trends.',
-    affectedSections: [4, 5], // Field Operations, Scheduling
-    recommendations: recommendations
-  };
-}
-
-/**
- * Generate insight about problem sections
- * @param {Object[]} validationIssues
- * @param {Object} allValues
- * @param {Object[]} kpiConfig
- * @param {Object[]} sectionConfig
- * @returns {Object|null}
- */
-function generateSectionInsight(validationIssues, allValues, kpiConfig, sectionConfig) {
-  const problemSections = identifyProblemSections(validationIssues, allValues, kpiConfig, sectionConfig);
-
-  if (problemSections.length === 0) {
-    return null;
-  }
-
-  const sectionNames = problemSections.map(s => s.sectionName).join(', ');
-
-  return {
-    type: 'sections',
-    title: 'Areas Needing Attention',
-    status: 'warning',
-    summary: `The following areas have issues: ${sectionNames}`,
-    detail: problemSections.map(s => `${s.sectionName}: ${s.reasons.join('; ')}`).join(' | '),
-    affectedSections: problemSections.map(s => s.sectionId),
-    recommendations: [
-      'Focus improvement efforts on these areas first',
-      'Review the specific KPIs flagged in each section'
-    ]
-  };
+function getSectionDisplayName(sectionId, sectionConfig) {
+  const section = sectionConfig.find(s => s.sectionId === sectionId);
+  const icon = getSectionIcon(sectionId);
+  const name = section?.sectionName || `Section ${sectionId}`;
+  return icon ? `${icon} ${name.toUpperCase()}` : name.toUpperCase();
 }
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
-
-// Note: getRating() and getRatingDisplay() functions are now in BenchmarkEngine.gs
-// They support both 'higher is better' and 'lower is better' KPIs via the direction parameter
-
-/**
- * Identify which business sections need attention
- * @param {Object[]} validationIssues
- * @param {Object} allValues
- * @param {Object[]} kpiConfig
- * @param {Object[]} sectionConfig
- * @returns {Object[]} [{sectionId, sectionName, severity, reasons}]
- */
-function identifyProblemSections(validationIssues, allValues, kpiConfig, sectionConfig) {
-  const sectionIssues = {};
-
-  // Aggregate issues by section
-  for (const issue of validationIssues) {
-    if (issue.severity === 'info') continue; // Skip info-level
-
-    const sections = issue.affectedSections || [];
-
-    for (const sectionId of sections) {
-      if (!sectionIssues[sectionId]) {
-        const section = sectionConfig.find(s => s.sectionId === sectionId);
-        sectionIssues[sectionId] = {
-          sectionId: sectionId,
-          sectionName: section ? section.sectionName : `Section ${sectionId}`,
-          severity: 'info',
-          reasons: []
-        };
-      }
-
-      // Update severity (escalate to most severe)
-      if (issue.severity === 'error') {
-        sectionIssues[sectionId].severity = 'error';
-      } else if (issue.severity === 'warning' && sectionIssues[sectionId].severity !== 'error') {
-        sectionIssues[sectionId].severity = 'warning';
-      }
-
-      // Add reason
-      sectionIssues[sectionId].reasons.push(issue.ruleName);
-    }
-  }
-
-  // Convert to array and sort by severity
-  return Object.values(sectionIssues)
-    .filter(s => s.reasons.length > 0)
-    .sort((a, b) => {
-      const order = { error: 0, warning: 1, info: 2 };
-      return (order[a.severity] || 99) - (order[b.severity] || 99);
-    });
-}
 
 /**
  * Get affected sections from validation issues
@@ -624,4 +696,63 @@ function generateSummary(clientData, allValues, insights) {
   }
 
   return parts.join(' ');
+}
+
+/**
+ * Identify which business sections need attention
+ * @param {Object[]} validationIssues
+ * @param {Object} allValues
+ * @param {Object[]} kpiConfig
+ * @param {Object[]} sectionConfig
+ * @returns {Object[]} [{sectionId, sectionName, severity, reasons}]
+ */
+function identifyProblemSections(validationIssues, allValues, kpiConfig, sectionConfig) {
+  const sectionIssues = {};
+
+  // Aggregate issues by section
+  for (const issue of validationIssues) {
+    if (issue.severity === 'info') continue; // Skip info-level
+
+    const sections = issue.affectedSections || [];
+
+    for (const sectionId of sections) {
+      if (!sectionIssues[sectionId]) {
+        const section = sectionConfig.find(s => s.sectionId === sectionId);
+        sectionIssues[sectionId] = {
+          sectionId: sectionId,
+          sectionName: section ? section.sectionName : `Section ${sectionId}`,
+          severity: 'info',
+          reasons: []
+        };
+      }
+
+      // Update severity (escalate to most severe)
+      if (issue.severity === 'error') {
+        sectionIssues[sectionId].severity = 'error';
+      } else if (issue.severity === 'warning' && sectionIssues[sectionId].severity !== 'error') {
+        sectionIssues[sectionId].severity = 'warning';
+      }
+
+      // Add reason
+      sectionIssues[sectionId].reasons.push(issue.ruleName);
+    }
+  }
+
+  // Convert to array and sort by severity
+  return Object.values(sectionIssues)
+    .filter(s => s.reasons.length > 0)
+    .sort((a, b) => {
+      const order = { error: 0, warning: 1, info: 2 };
+      return (order[a.severity] || 99) - (order[b.severity] || 99);
+    });
+}
+
+/**
+ * Capitalize first letter of a string
+ * @param {string} str - Input string
+ * @returns {string} Capitalized string
+ */
+function capitalizeFirst(str) {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }

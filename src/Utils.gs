@@ -14,6 +14,7 @@ const SHEET_NAMES = {
   CONFIG_VALIDATIONS: 'Config_Validations',
   CONFIG_SECTIONS: 'Config_Sections',
   CONFIG_BENCHMARKS: 'Config_Benchmarks',
+  CONFIG_INSIGHTS: 'Config_Insights',
   CLIENTS: 'Clients',
   RESULTS: 'Results',
   VALIDATION_LOG: 'Validation_Log',

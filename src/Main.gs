@@ -326,6 +326,13 @@ function initializeConfigSheets() {
   } else {
     log('Config_Benchmarks sheet already exists with data - skipping');
   }
+
+  // Config_Insights (v2.1 - modular insight rules)
+  if (!sheetExists(SHEET_NAMES.CONFIG_INSIGHTS) || isSheetEmpty(SHEET_NAMES.CONFIG_INSIGHTS)) {
+    initializeInsightConfig();
+  } else {
+    log('Config_Insights sheet already exists with data - skipping');
+  }
 }
 
 /**
