@@ -288,32 +288,21 @@ function processNewSubmission(e) {
     // Add form_tier to record
     clientRecord.form_tier = formTier;
 
-    // Check if client already exists (by email or company name)
-    const existingClient = findExistingClient(
-      clientRecord.contact_email,
-      clientRecord.company_name
-    );
+    // Always create a new client row (never overwrite existing data)
+    // Note: findExistingClient() and updateClientRecord() are available if
+    // merge behavior is needed in the future, but by default we always append.
+    const clientId = generateClientId(clientRecord.company_name || 'Unknown');
+    clientRecord.client_id = clientId;
+    clientRecord.timestamp = clientRecord.timestamp || new Date();
+    clientRecord.period_days = getPeriodDays(clientRecord.data_period);
+    clientRecord.analysis_status = ANALYSIS_STATUS.PENDING;
 
-    if (existingClient) {
-      // UPDATE existing client row
-      updateClientRecord(existingClient.rowIndex, clientRecord, formTier);
-      log(`Updated existing client: ${existingClient.clientId} (${clientRecord.company_name}), tier: ${formTier}`);
-      return existingClient.clientId;
-    } else {
-      // CREATE new client row
-      const clientId = generateClientId(clientRecord.company_name || 'Unknown');
-      clientRecord.client_id = clientId;
-      clientRecord.timestamp = clientRecord.timestamp || new Date();
-      clientRecord.period_days = getPeriodDays(clientRecord.data_period);
-      clientRecord.analysis_status = ANALYSIS_STATUS.PENDING;
+    // Write to Clients sheet (always appends new row)
+    const clientsSheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
+    writeClientRecord(clientsSheet, clientRecord);
 
-      // Write to Clients sheet
-      const clientsSheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
-      writeClientRecord(clientsSheet, clientRecord);
-
-      log(`Created new client: ${clientId} (${clientRecord.company_name}), tier: ${formTier}`);
-      return clientId;
-    }
+    log(`Created new client: ${clientId} (${clientRecord.company_name}), tier: ${formTier}`);
+    return clientId;
 
   } catch (error) {
     logError('Error processing new submission', error);
