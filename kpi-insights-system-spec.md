@@ -1,997 +1,677 @@
-# KPI Analyzer — Insights System Specification
+# KPI Insights System Specification
 
-**Date**: December 9, 2024  
-**Priority**: HIGH  
-**Prepared by**: Claude (AI Assistant)  
-**For**: Lead Developer
+**Version**: 2.0
+**Date**: December 9, 2024
+**Status**: Ready for Implementation
 
 ---
 
-## Executive Summary
+## Overview
 
-The Insights System generates actionable findings based on KPI performance against benchmarks. This spec covers:
+The Insights System generates plain-English findings and recommendations based on KPI performance. Insights are **fully configurable via spreadsheet** — no code changes needed to add, edit, or remove insights.
 
-1. New Config_Insights sheet for modular insight rules
-2. Support for single-KPI and composite (multi-KPI) insights
-3. Template-based text with placeholders
-4. Section-grouped output in Results sheet
-5. Proper color coding based on business meaning (not just rating direction)
+**Key Features**:
+- Config-driven insight rules (Config_Insights sheet)
+- Single-KPI and composite (multi-KPI) triggers
+- Template-based messaging with placeholders
+- Section-grouped output
+- **NEW**: Operational Visibility Gap detection for missing data
 
 ---
 
 ## Table of Contents
 
-1. [Config_Insights Schema](#1-config_insights-schema)
-2. [Single-KPI Insights](#2-single-kpi-insights)
-3. [Composite Insights (Multi-KPI)](#3-composite-insights-multi-kpi)
-4. [Template Placeholders](#4-template-placeholders)
-5. [Results Sheet Output](#5-results-sheet-output)
-6. [Code Architecture](#6-code-architecture)
-7. [Migration from Hardcoded Insights](#7-migration-from-hardcoded-insights)
-8. [Testing Checklist](#8-testing-checklist)
+1. [Visibility Gap Detection (NEW)](#1-visibility-gap-detection)
+2. [Config_Insights Sheet Schema](#2-config_insights-sheet-schema)
+3. [Insight Types & Trigger Logic](#3-insight-types--trigger-logic)
+4. [Template System](#4-template-system)
+5. [Results Output Format](#5-results-output-format)
+6. [Implementation Guide](#6-implementation-guide)
 
 ---
 
-## 1. Config_Insights Schema
+## 1. Visibility Gap Detection
+
+### Purpose
+
+Missing critical inputs are **not neutral** — they indicate operational visibility problems. This is the foundation of **Pillar 1: Operational Visibility**.
+
+If a user doesn't know their total leads, close rate, or COGS, that IS the diagnosis.
+
+### How It Works
+
+1. Each input KPI in Config_KPIs has a `visibility_flag` column
+2. When an input is blank/null, system checks its visibility_flag
+3. If flagged, generates a "Visibility Gap" insight
+4. Visibility gaps appear FIRST in the Insights section
+
+### Config_KPIs Column Additions
+
+Add these columns to Config_KPIs:
+
+| Column Name | Data Type | Values | Description |
+|-------------|-----------|--------|-------------|
+| `visibility_flag` | Text | `critical`, `important`, `helpful`, *(blank)* | Severity if this KPI is missing |
+| `missing_message` | Text | Free text | Custom message explaining why this matters |
+| `missing_recommendation` | Text | Free text | What to do to start tracking this |
+
+### Visibility Flag Tiers
+
+| Flag | Severity | Meaning | Example KPIs |
+|------|----------|---------|--------------|
+| `critical` | 🔴 Red | Cannot assess business without this | total_leads, gross_revenue, jobs_closed, num_employees, num_techs |
+| `important` | 🟠 Orange | Needed for meaningful analysis | FIN_CORE_002, total_overhead_costs, CSR_CORE_005, reported_close_rate |
+| `helpful` | 🟡 Yellow | Enhances analysis but not essential | FLD_CORE_010, HR_CORE_003, FLD_CORE_004 |
+| *(blank)* | — | No insight if missing | Optional/detailed metrics |
+
+### Recommended KPI Visibility Flags
+
+**Critical (must know)**:
+```
+num_employees          → "You don't know your headcount"
+num_techs              → "You don't know how many technicians you have"
+total_leads            → "You don't know how many leads you're getting"
+gross_revenue          → "You don't know your revenue"
+jobs_closed            → "You don't know how many jobs you completed"
+```
+
+**Important (should know)**:
+```
+CSR_CORE_005 (booked)  → "You don't know your booking volume"
+FIN_CORE_002 (COGS)    → "You don't know your direct job costs"
+total_overhead_costs   → "You don't know your overhead costs"
+reported_close_rate    → "You don't know your close rate"
+total_capacity         → "You don't know your capacity"
+MKT_CORE_001 (mkt $)   → "You don't know your marketing spend"
+```
+
+**Helpful (nice to know)**:
+```
+FLD_CORE_010 (inspected)   → "You're not tracking QC inspections"
+FLD_CORE_003 (failed QC)   → "You're not tracking QC failures"
+FLD_CORE_004 (rework)      → "You're not tracking rework/callbacks"
+HR_CORE_003 (separations)  → "You're not tracking employee turnover"
+```
+
+### Visibility Gap Output Format
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ OPERATIONAL VISIBILITY GAPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔴 Critical: Lead Volume Unknown
+   You left "Total Leads" blank. Without this, you can't measure
+   marketing ROI, booking rate, or cost per lead.
+
+   → Set up call tracking or log inquiries in a CRM
+   → This is foundational data — prioritize this first
+
+🟠 Important: Cost of Goods Sold Unknown
+   You left "Total COGS" blank. Without this, you can't calculate
+   true profit margin or job-level profitability.
+
+   → Work with your bookkeeper to separate COGS from overhead
+   → Track materials + subcontractor costs per job
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 VISIBILITY SUMMARY: 2 of 12 critical metrics missing
+   Pillar 1 (Operational Visibility) needs attention before
+   performance analysis can provide meaningful insights.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### Visibility Gap Logic
+
+```javascript
+function generateVisibilityGapInsights(allValues, kpiConfig) {
+  const gaps = [];
+
+  // Only check input KPIs with visibility flags
+  const flaggedInputs = kpiConfig.filter(k =>
+    k.type === 'input' &&
+    k.visibilityFlag &&
+    k.active === true
+  );
+
+  for (const kpi of flaggedInputs) {
+    const value = allValues[kpi.id];
+
+    // Check if value is missing (null, undefined, empty, or NaN)
+    if (isEmpty(value)) {
+      gaps.push({
+        kpiId: kpi.id,
+        kpiName: kpi.name,
+        severity: kpi.visibilityFlag,  // critical, important, helpful
+        message: kpi.missingMessage || `You don't know your ${kpi.name.toLowerCase()}`,
+        recommendation: kpi.missingRecommendation || 'Start tracking this metric'
+      });
+    }
+  }
+
+  // Sort by severity (critical first, then important, then helpful)
+  const severityOrder = { critical: 1, important: 2, helpful: 3 };
+  gaps.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+
+  return gaps;
+}
+```
+
+---
+
+## 2. Config_Insights Sheet Schema
 
 ### Sheet Structure
 
 | Column | Type | Required | Description |
 |--------|------|----------|-------------|
-| `insight_id` | string | Yes | Unique identifier (e.g., `booking_poor`, `sales_funnel_leak`) |
-| `insight_type` | string | Yes | `single` (one KPI) or `composite` (multiple KPIs) |
-| `kpi_ids` | string | Yes | Single KPI ID or comma-separated list |
-| `trigger_logic` | string | Yes | Rating condition(s) — see syntax below |
-| `title` | string | Yes | Display title (e.g., "Booking Performance") |
-| `status` | string | Yes | `concern`, `warning`, `good` — controls icon/color |
-| `summary_template` | string | Yes | Summary text with placeholders |
-| `detail_template` | string | No | Extended detail text with placeholders |
-| `recommendations` | string | No | Pipe-separated list, max 5 (`rec1\|rec2\|rec3`) |
-| `section_id` | integer | Yes | Primary section for grouping (1-9) |
-| `affected_sections` | string | No | Additional sections (comma-separated) |
-| `form_tier` | string | No | `onboarding`, `detailed`, `section_deep`, or blank for all |
-| `priority` | integer | No | Display order within section (lower = first). Default: 100 |
-| `active` | boolean | Yes | `TRUE` to enable, `FALSE` to disable |
+| `insight_id` | Text | Yes | Unique identifier (snake_case) |
+| `insight_type` | Text | Yes | `single` or `composite` |
+| `kpi_ids` | Text | Yes | Comma-separated KPI IDs |
+| `trigger_logic` | Text | Yes | Rating condition(s) to trigger |
+| `title` | Text | Yes | Insight heading |
+| `status` | Text | Yes | `good`, `concern`, `warning` |
+| `summary_template` | Text | Yes | One-line summary with placeholders |
+| `detail_template` | Text | No | Extended explanation |
+| `recommendations` | Text | No | Pipe-separated recommendations |
+| `section_id` | Integer | Yes | Business section (1-9) |
+| `affected_sections` | Text | No | Additional sections (comma-separated) |
+| `form_tier` | Text | Yes | `onboarding`, `detailed`, `section_deep` |
+| `priority` | Integer | Yes | Display order (lower = first) |
+| `active` | Boolean | Yes | TRUE/FALSE |
 
-### Trigger Logic Syntax
+### Example Rows
 
-#### For Single-KPI Insights (`insight_type: single`)
-
-| Syntax | Meaning |
-|--------|---------|
-| `critical` | Exactly critical rating |
-| `poor` | Exactly poor rating |
-| `average` | Exactly average rating |
-| `good` | Exactly good rating |
-| `excellent` | Exactly excellent rating |
-| `poor-` | Poor or worse (poor, critical) |
-| `good+` | Good or better (good, excellent) |
-| `average-` | Average or worse (average, poor, critical) |
-| `average+` | Average or better (average, good, excellent) |
-| `any` | Any rating (always triggers if KPI has value) |
-
-**Examples:**
+**Single-KPI Insight**:
 ```
-kpi_ids: close_rate
-trigger_logic: poor-
-→ Triggers when close_rate is "poor" or "critical"
-
+insight_id: booking_good
+insight_type: single
 kpi_ids: booking_rate
 trigger_logic: good+
-→ Triggers when booking_rate is "good" or "excellent"
+title: Booking Performance
+status: good
+summary_template: Your booking rate of {value}% is above average.
+detail_template: Good performance converting leads to appointments.
+recommendations: Document what's working for your CSR team|Consider if you can scale lead volume
+section_id: 2
+form_tier: onboarding
+priority: 10
+active: TRUE
 ```
 
-#### For Composite Insights (`insight_type: composite`)
-
-Use `AND` to combine conditions:
-
+**Composite Insight** (multiple KPIs):
 ```
+insight_id: funnel_leak
+insight_type: composite
 kpi_ids: booking_rate,close_rate
 trigger_logic: booking_rate:good+ AND close_rate:poor-
-```
-
-**Syntax:** `kpi_id:condition AND kpi_id:condition [AND ...]`
-
-**Examples:**
-```
-# Marketing working but sales failing
-kpi_ids: booking_rate,close_rate
-trigger_logic: booking_rate:good+ AND close_rate:poor-
-
-# High volume but quality issues
-kpi_ids: jobs_closed,rework_rate
-trigger_logic: jobs_closed:good+ AND rework_rate:poor-
-
-# Profitable but capacity constrained
-kpi_ids: profit_margin,schedule_efficiency
-trigger_logic: profit_margin:good+ AND schedule_efficiency:critical
+title: Sales Funnel Leak
+status: concern
+summary_template: Marketing is generating leads, but sales isn't converting them.
+detail_template: Booking rate of {booking_rate}% is strong, but close rate of {close_rate}% is below average.
+recommendations: Focus on sales process, not lead generation|Review why appointments aren't closing|Consider sales training
+section_id: 3
+form_tier: onboarding
+priority: 5
+active: TRUE
 ```
 
 ---
 
-## 2. Single-KPI Insights
+## 3. Insight Types & Trigger Logic
 
-### Example Rows
+### Single-KPI Triggers
 
-```
-insight_id       | insight_type | kpi_ids      | trigger_logic | title               | status  | summary_template                                          | detail_template                                                         | recommendations                                                                          | section_id | form_tier  | priority | active
------------------|--------------|--------------|---------------|---------------------|---------|-----------------------------------------------------------|-------------------------------------------------------------------------|------------------------------------------------------------------------------------------|------------|------------|----------|-------
-booking_critical | single       | booking_rate | critical      | Booking Performance | concern | Your booking rate of {value}% is critically low.          | This is well below the {benchmark_poor}% minimum. Immediate action needed. | Urgent: Audit CSR call handling|Review lead quality|Check phone system issues           | 2          | onboarding | 10       | TRUE
-booking_poor     | single       | booking_rate | poor          | Booking Performance | concern | Your booking rate of {value}% is below average.           | For every 100 leads, only {value_rounded} become appointments. Industry average is {benchmark_avg}%. | Review CSR call scripts and training|Analyze why leads aren't converting|Implement call monitoring | 2 | onboarding | 10 | TRUE
-booking_average  | single       | booking_rate | average       | Booking Performance | warning | Your booking rate of {value}% is average.                 | Room to improve from {value}% toward the {benchmark_good}% benchmark.    | Focus on CSR training to improve conversion|Review call handling for improvements       | 2          | onboarding | 10       | TRUE
-booking_good     | single       | booking_rate | good+         | Booking Performance | good    | Your booking rate of {value}% is above average.           | Good performance converting leads to appointments.                       | Document what's working|Consider if you can scale lead volume                            | 2          | onboarding | 10       | TRUE
-close_critical   | single       | close_rate   | critical      | Sales Performance   | concern | Your close rate of {value}% is critically low.            | Significantly below the {benchmark_poor}% threshold. Urgent attention required. | Urgent: Review entire sales process|Shadow top performers|Invest in sales coaching     | 3          | onboarding | 20       | TRUE
-close_poor       | single       | close_rate   | poor          | Sales Performance   | concern | Your close rate of {value}% needs improvement.            | Of your appointments, only {value}% convert to sales. Industry average is {benchmark_avg}%. | Review sales process and presentation|Analyze lost opportunities|Consider sales training | 3 | onboarding | 20 | TRUE
-close_average    | single       | close_rate   | average       | Sales Performance   | warning | Your close rate of {value}% is average.                   | Room to improve from {value}% toward {benchmark_good}%.                  | Identify what top performers do differently|Review proposal process                     | 3          | onboarding | 20       | TRUE
-close_good       | single       | close_rate   | good+         | Sales Performance   | good    | Your close rate of {value}% is strong.                    | You're converting appointments to sales above average.                   | Maintain quality|Document successful techniques                                          | 3          | onboarding | 20       | TRUE
-rework_poor      | single       | rework_rate  | poor-         | Quality Issues      | concern | Rework rate of {value}% is too high.                      | Industry target is below {benchmark_good}%. High rework hurts profitability. | Implement QC checkpoints|Review technician training|Analyze root causes of callbacks   | 4          | detailed   | 30       | TRUE
-rework_good      | single       | rework_rate  | good+         | Quality Performance | good    | Your rework rate of {value}% is excellent.                | Below the {benchmark_good}% industry target.                             | Document quality processes|Share best practices across team                              | 4          | detailed   | 30       | TRUE
-profit_critical  | single       | profit_margin| critical      | Profitability Alert | concern | You're operating at a loss with {value}% margin.          | Costs exceed revenue. Immediate attention required.                      | Review pricing strategy|Analyze cost structure|Identify unprofitable jobs|Pause growth   | 7          | onboarding | 5        | TRUE
-profit_poor      | single       | profit_margin| poor          | Profitability       | concern | Profit margin of {value}% is below healthy levels.        | Industry target is {benchmark_avg}%+. Review your cost structure.        | Review pricing - are you undercharging?|Identify high-cost jobs|Negotiate supplier terms | 7          | onboarding | 15       | TRUE
-profit_good      | single       | profit_margin| good+         | Profitability       | good    | Strong profit margin of {value}%.                         | Above the {benchmark_good}% benchmark.                                   | Maintain pricing discipline|Consider strategic investments                                | 7          | onboarding | 15       | TRUE
-```
+| Trigger | Meaning | Example |
+|---------|---------|---------|
+| `critical` | Exactly critical rating | `critical` |
+| `poor` | Exactly poor rating | `poor` |
+| `poor-` | Poor or worse (poor, critical) | `poor-` |
+| `average` | Exactly average rating | `average` |
+| `good` | Exactly good rating | `good` |
+| `good+` | Good or better (good, excellent) | `good+` |
+| `excellent` | Exactly excellent rating | `excellent` |
+| `any` | Any rating (always triggers if KPI has value) | `any` |
 
----
+### Composite Triggers
 
-## 3. Composite Insights (Multi-KPI)
-
-### Use Cases
-
-| Scenario | KPIs Involved | Business Meaning |
-|----------|---------------|------------------|
-| Marketing-Sales Disconnect | booking_rate + close_rate | Leads coming in but not closing |
-| Volume vs Quality | jobs_closed + rework_rate | High volume but quality suffering |
-| Growth vs Capacity | gross_revenue + schedule_efficiency | Growing but can't keep up |
-| Sales vs Profit | close_rate + profit_margin | Closing deals but not profitably |
-
-### Example Rows
+Multiple conditions joined with `AND`:
 
 ```
-insight_id           | insight_type | kpi_ids                       | trigger_logic                                    | title                    | status  | summary_template                                                                           | detail_template                                                                                             | recommendations                                                                                      | section_id | form_tier  | priority | active
----------------------|--------------|-------------------------------|--------------------------------------------------|--------------------------|---------|--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|------------|------------|----------|-------
-funnel_leak          | composite    | booking_rate,close_rate       | booking_rate:good+ AND close_rate:poor-          | Sales Funnel Leak        | concern | Marketing is generating leads, but sales isn't converting them.                            | Booking rate of {booking_rate}% is strong, but close rate of {close_rate}% is low. The problem is in sales, not marketing. | Focus on sales process, not lead generation|Review why appointments aren't closing|Sales training may help | 3          | onboarding | 8        | TRUE
-volume_quality       | composite    | jobs_closed,rework_rate       | jobs_closed:good+ AND rework_rate:poor-          | Volume vs Quality        | warning | High job volume but quality is suffering.                                                  | Closing {jobs_closed} jobs is great, but {rework_rate}% rework rate indicates rushing.                       | Slow down to maintain quality|Add QC checkpoints|Review technician workloads                           | 4          | detailed   | 25       | TRUE
-growth_capacity      | composite    | gross_revenue,schedule_efficiency | gross_revenue:good+ AND schedule_efficiency:critical | Capacity Constraint   | warning | Revenue is strong but you're maxed out on capacity.                                        | {gross_revenue_formatted} revenue with {schedule_efficiency}% capacity utilization means you're at the limit. | Consider hiring|Optimize scheduling|May need to raise prices to manage demand                       | 5          | detailed   | 20       | TRUE
-closing_unprofitably | composite    | close_rate,profit_margin      | close_rate:good+ AND profit_margin:poor-         | Closing Unprofitably     | concern | You're closing deals but not making money on them.                                         | Close rate of {close_rate}% is good, but profit margin of {profit_margin}% is concerning.                    | Review pricing - you may be underselling|Analyze job costs|Ensure estimates include all costs         | 3,7        | onboarding | 7        | TRUE
-marketing_waste      | composite    | cost_per_lead,booking_rate    | cost_per_lead:poor- AND booking_rate:poor-       | Marketing Inefficiency   | concern | Marketing spend is high but results are poor.                                              | Cost per lead of {cost_per_lead_formatted} is high, and only {booking_rate}% of leads book.                  | Audit marketing channels|Cut underperforming campaigns|Review lead quality vs quantity               | 1          | detailed   | 12       | TRUE
-balanced_growth      | composite    | gross_revenue,profit_margin,schedule_efficiency | gross_revenue:good+ AND profit_margin:good+ AND schedule_efficiency:average+ | Healthy Growth | good | Business is growing sustainably with healthy margins and manageable capacity.              | Revenue, profitability, and capacity are all in good balance.                                                | Maintain current trajectory|Consider strategic expansion                                              | 7          | onboarding | 50       | TRUE
+booking_rate:good+ AND close_rate:poor-
 ```
 
-### Composite Placeholder Access
+**Meaning**: Triggers when booking_rate is good or better AND close_rate is poor or worse.
 
-For composite insights, access each KPI's value using the KPI ID as prefix:
+### Trigger Evaluation Logic
 
-| Placeholder | Description |
-|-------------|-------------|
-| `{booking_rate}` | booking_rate value |
-| `{booking_rate_formatted}` | booking_rate formatted |
-| `{close_rate}` | close_rate value |
-| `{close_rate_formatted}` | close_rate formatted |
-| `{gross_revenue}` | gross_revenue value |
-| `{gross_revenue_formatted}` | gross_revenue formatted (e.g., "$125,000") |
+```javascript
+function evaluateTrigger(triggerLogic, kpiRatings) {
+  // Split on AND
+  const conditions = triggerLogic.split(/\s+AND\s+/i);
 
----
+  // ALL conditions must be true
+  for (const condition of conditions) {
+    const [kpiId, ratingCondition] = condition.split(':');
+    const actualRating = kpiRatings[kpiId.trim()];
 
-## 4. Template Placeholders
+    if (!matchesRatingCondition(actualRating, ratingCondition.trim())) {
+      return false;
+    }
+  }
 
-### Universal Placeholders (All Insights)
+  return true;
+}
 
-| Placeholder | Description | Example |
-|-------------|-------------|---------|
-| `{company_name}` | Client company name | "ABC Plumbing" |
-| `{industry}` | Client industry | "HVAC" |
-| `{state}` | Client state/province | "California" |
+function matchesRatingCondition(actual, condition) {
+  const ratingOrder = { critical: 1, poor: 2, average: 3, good: 4, excellent: 5 };
+  const actualOrder = ratingOrder[actual?.toLowerCase()];
 
-### Single-KPI Placeholders
+  if (!actualOrder) return false;
 
-| Placeholder | Description | Example |
-|-------------|-------------|---------|
-| `{value}` | Raw KPI value | 45.5 |
-| `{value_rounded}` | Rounded to integer | 46 |
-| `{value_formatted}` | Formatted per data_type | "45.5%" or "$1,234" |
-| `{kpi_name}` | KPI display name | "Close Rate" |
-| `{rating}` | Current rating | "Average" |
-| `{benchmark_poor}` | Poor threshold | 20 |
-| `{benchmark_avg}` | Average threshold | 35 |
-| `{benchmark_good}` | Good threshold | 50 |
-| `{benchmark_excellent}` | Excellent threshold | 65 |
+  if (condition === 'any') return true;
 
-### Composite-KPI Placeholders
+  // Handle range conditions
+  if (condition.endsWith('-')) {
+    const baseRating = condition.slice(0, -1);
+    return actualOrder <= ratingOrder[baseRating];
+  }
 
-For each KPI in the composite, use `{kpi_id}` and `{kpi_id_formatted}`:
+  if (condition.endsWith('+')) {
+    const baseRating = condition.slice(0, -1);
+    return actualOrder >= ratingOrder[baseRating];
+  }
 
-```
-kpi_ids: booking_rate,close_rate
-
-Available placeholders:
-{booking_rate}           → 72
-{booking_rate_formatted} → "72%"
-{booking_rate_rating}    → "Good"
-{close_rate}             → 25
-{close_rate_formatted}   → "25%"
-{close_rate_rating}      → "Poor"
+  // Exact match
+  return actual?.toLowerCase() === condition.toLowerCase();
+}
 ```
 
 ---
 
-## 5. Results Sheet Output
+## 4. Template System
 
-### Section-Grouped Layout
+### Placeholder Types
+
+**Universal Placeholders** (always available):
+```
+{company_name}  → Client's company name
+{industry}      → Client's industry
+{state}         → Client's state
+```
+
+**Single-KPI Placeholders** (when insight_type = single):
+```
+{value}              → Raw value (e.g., 75)
+{value_formatted}    → Formatted value (e.g., "75.0%")
+{value_rounded}      → Rounded integer (e.g., 75)
+{kpi_name}           → KPI display name (e.g., "Booking Rate")
+{rating}             → Rating label (e.g., "Good")
+{benchmark_good}     → Good threshold from benchmark
+{benchmark_poor}     → Poor threshold from benchmark
+```
+
+**Composite Placeholders** (use KPI ID as prefix):
+```
+{booking_rate}           → Raw value
+{booking_rate_formatted} → Formatted value
+{booking_rate_rating}    → Rating
+{close_rate}             → Raw value
+{close_rate_formatted}   → Formatted value
+{close_rate_rating}      → Rating
+```
+
+### Template Examples
+
+**Single-KPI**:
+```
+summary_template: Your {kpi_name} of {value_formatted} is {rating}.
+→ "Your Booking Rate of 75.0% is Good."
+```
+
+**Composite**:
+```
+summary_template: Strong lead conversion ({booking_rate_formatted}) but weak close rate ({close_rate_formatted}).
+→ "Strong lead conversion (75.0%) but weak close rate (32.0%)."
+```
+
+### Recommendations Format
+
+Pipe-separated list (max 5):
+```
+recommendations: Review CSR scripts|Add call tracking|Train on objection handling
+```
+
+Output:
+```
+→ Review CSR scripts
+→ Add call tracking
+→ Train on objection handling
+```
+
+---
+
+## 5. Results Output Format
+
+### Section Order
+
+1. **Operational Visibility Gaps** (if any missing critical/important inputs)
+2. **Data Quality** (validation results)
+3. **Section-Grouped Insights** (grouped by business section)
+
+### Full Output Example
 
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 INSIGHTS & FINDINGS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ OPERATIONAL VISIBILITY GAPS
+
+🔴 Critical: Lead Volume Unknown
+   You left "Total Leads" blank.
+   → Set up call tracking or CRM to log all inquiries
+
+📊 1 of 12 critical metrics missing — address visibility gaps first.
+
+────────────────────────────────────────────────────────────────────
 
 📊 DATA QUALITY
-━━━━━━━━━━━━━━━
 ✓ Data Quality
   Your data is internally consistent with no validation errors.
-  All reported metrics reconcile properly.
 
-📣 MARKETING (Section 1)
-━━━━━━━━━━━━━━━━━━━━━━━━
-[No insights for this section]
+────────────────────────────────────────────────────────────────────
 
 📞 CSR / CALL CENTER (Section 2)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⬇ Booking Performance                                          [CONCERN]
-  Your booking rate of 32% is below average.
-  For every 100 leads, only 32 become appointments. Industry average is 50%.
-    → Review CSR call scripts and training
-    → Analyze why leads aren't converting to appointments
-    → Consider implementing call monitoring
+
+✓ Booking Performance [GOOD]
+  Your booking rate of 75.0% is above average.
+  → Document what's working for your CSR team
+  → Consider if you can scale lead volume
+
+────────────────────────────────────────────────────────────────────
 
 💼 SALES (Section 3)
-━━━━━━━━━━━━━━━━━━━━
-⬇⬇ Sales Funnel Leak                                           [CONCERN]
-  Marketing is generating leads, but sales isn't converting them.
-  Booking rate of 72% is strong, but close rate of 25% is low.
-    → Focus on sales process, not lead generation
-    → Review why appointments aren't closing
-    → Sales training may help
 
-➡ Sales Performance                                             [WARNING]
-  Your close rate of 35% is average.
-  Room to improve from 35% toward 50%.
-    → Identify what top performers do differently
-    → Review proposal process
+⚠️ Sales Funnel Leak [CONCERN]
+  Marketing is generating leads, but sales isn't converting them.
+  Booking rate of 75.0% is strong, but close rate of 32.0% is below average.
+  → Focus on sales process, not lead generation
+  → Review why appointments aren't closing
+  → Consider sales training
+
+────────────────────────────────────────────────────────────────────
 
 🔧 FIELD OPERATIONS (Section 4)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⬆ Quality Performance                                           [GOOD]
-  Your rework rate of 4% is excellent.
-  Below the 5% industry target.
-    → Document quality processes
-    → Share best practices across team
 
-💰 FINANCE (Section 7)
-━━━━━━━━━━━━━━━━━━━━━━
-⬆ Profitability                                                 [GOOD]
-  Strong profit margin of 22%.
-  Above the 20% benchmark.
-    → Maintain pricing discipline
-    → Consider strategic investments
+✓ No issues identified in this area.
+
+────────────────────────────────────────────────────────────────────
+
+💰 FINANCE/ACCOUNTING (Section 7)
+
+✓ Profitability [GOOD]
+  Profit margin of 28.5% is healthy for your industry.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-### Section Headers
+### Section Icons
 
-| Section ID | Icon | Name |
+| Section ID | Name | Icon |
 |------------|------|------|
-| 1 | 📣 | Marketing |
-| 2 | 📞 | CSR / Call Center |
-| 3 | 💼 | Sales |
-| 4 | 🔧 | Field Operations |
-| 5 | 📅 | Scheduling / Dispatch |
-| 6 | 📦 | Inventory / Warehouse |
-| 7 | 💰 | Finance / Accounting |
-| 8 | 👥 | HR / Training |
-| 9 | 📋 | Management |
+| 1 | Marketing | 📣 |
+| 2 | CSR/Call Center | 📞 |
+| 3 | Sales | 💼 |
+| 4 | Field Operations | 🔧 |
+| 5 | Scheduling/Dispatch | 📅 |
+| 6 | Inventory/Warehouse | 📦 |
+| 7 | Finance/Accounting | 💰 |
+| 8 | HR/Training | 👥 |
+| 9 | Management | 📊 |
 
-### Status Icons and Colors
+### Status Icons
 
-| Status | Icon | Text Color | Background |
-|--------|------|------------|------------|
-| `concern` | ⬇⬇ or ⬇ | `#c62828` (red) | `#ffebee` (light red) |
-| `warning` | ➡ | `#f57c00` (orange) | `#fff3e0` (light orange) |
-| `good` | ⬆ or ⬆⬆ | `#2e7d32` (green) | `#e8f5e9` (light green) |
+| Status | Icon | Color |
+|--------|------|-------|
+| good | ✓ | Green |
+| warning | ⚠️ | Orange |
+| concern | ⚠️ | Red |
 
-### Empty Section Handling
+### Sorting Within Sections
 
-Sections with no insights show a positive confirmation message:
-
-```
-📣 MARKETING (Section 1)
-━━━━━━━━━━━━━━━━━━━━━━━━
-  ✓ No issues identified in this area.
-```
-
-This reassures users that the section was evaluated, not skipped.
-
-### Insight Sorting Within Sections
-
-Insights are sorted in two passes:
-
-1. **Status severity** (concerns first, then warnings, then good)
-2. **Priority number** (lower = first, within same status)
-
-**Example:**
-```
-Config_Insights rows:
-- booking_good (status: good, priority: 10)
-- close_critical (status: concern, priority: 20)
-- rework_warning (status: warning, priority: 15)
-- profit_poor (status: concern, priority: 25)
-
-Output order:
-1. close_critical (concern, priority 20) ← concerns first
-2. profit_poor (concern, priority 25)    ← concern, higher priority number
-3. rework_warning (warning, priority 15) ← warnings second
-4. booking_good (good, priority 10)      ← good last, even though lowest priority number
-```
-
-### Maximum Recommendations
-
-Each insight displays a maximum of **5 recommendations**. If more than 5 are provided in the config, only the first 5 are shown.
+1. Status severity: concern → warning → good
+2. Priority number: lower first
 
 ---
 
-## 6. Code Architecture
+## 6. Implementation Guide
 
-### New File: InsightEngine.gs (or update InsightsEngine.gs)
+### Files to Create/Modify
+
+| File | Action | Purpose |
+|------|--------|---------|
+| **Config_Insights** | Create sheet | Store insight rules |
+| **Config_KPIs** | Add columns | visibility_flag, missing_message, missing_recommendation |
+| **Config.gs** | Add function | `loadInsightConfig()` |
+| **InsightsEngine.gs** | Rewrite | Modular insight generation |
+| **ResultsGenerator.gs** | Update | Section-grouped output |
+
+### Config.gs Addition
 
 ```javascript
 /**
- * InsightEngine.gs
- * Generate modular insights from Config_Insights rules
- */
-
-// ============================================================================
-// CONSTANTS
-// ============================================================================
-
-const MAX_RECOMMENDATIONS_PER_INSIGHT = 5;
-
-// ============================================================================
-// CONFIGURATION LOADING
-// ============================================================================
-
-/**
- * Load insight rules from Config_Insights sheet
- * @param {string} [tier] - Optional form tier filter
+ * Load insight configuration from Config_Insights sheet
  * @returns {Object[]} Array of insight rule objects
  */
-function loadInsightConfig(tier = null) {
-  const sheet = getRequiredSheet(SHEET_NAMES.CONFIG_INSIGHTS);
+function loadInsightConfig() {
+  const sheet = getRequiredSheet('Config_Insights');
   const data = sheetToObjects(sheet);
-  
-  let insights = data
+
+  return data
     .filter(row => row.active === true || row.active === 'TRUE')
     .map(row => ({
-      id: String(row.insight_id || '').trim(),
-      type: String(row.insight_type || 'single').toLowerCase().trim(),
-      kpiIds: parseKpiIds(row.kpi_ids),
-      triggerLogic: String(row.trigger_logic || '').trim(),
-      title: String(row.title || '').trim(),
-      status: String(row.status || 'warning').toLowerCase().trim(),
-      summaryTemplate: String(row.summary_template || '').trim(),
-      detailTemplate: String(row.detail_template || '').trim(),
+      id: row.insight_id,
+      type: row.insight_type,  // 'single' or 'composite'
+      kpiIds: String(row.kpi_ids || '').split(',').map(s => s.trim()),
+      triggerLogic: row.trigger_logic,
+      title: row.title,
+      status: row.status,
+      summaryTemplate: row.summary_template,
+      detailTemplate: row.detail_template || '',
       recommendations: parseRecommendations(row.recommendations),
-      sectionId: parseInt(row.section_id, 10) || 0,
-      affectedSections: parseSections(row.affected_sections),
-      formTier: String(row.form_tier || '').toLowerCase().trim(),
-      priority: parseInt(row.priority, 10) || 100,
-      active: true
-    }))
-    .filter(i => i.id && i.kpiIds.length > 0 && i.triggerLogic);
-  
-  // Filter by tier if specified
-  if (tier) {
-    const tierLower = tier.toLowerCase();
-    insights = insights.filter(i => !i.formTier || i.formTier === tierLower);
-  }
-  
-  return insights;
+      sectionId: parseInt(row.section_id) || 0,
+      affectedSections: parseIntList(row.affected_sections),
+      formTier: row.form_tier || 'onboarding',
+      priority: parseInt(row.priority) || 99
+    }));
 }
 
-/**
- * Parse comma-separated KPI IDs
- */
-function parseKpiIds(str) {
-  if (!str) return [];
-  return String(str).split(',').map(s => s.trim()).filter(s => s.length > 0);
-}
-
-/**
- * Parse pipe-separated recommendations (max 5)
- */
 function parseRecommendations(str) {
   if (!str) return [];
-  const recs = String(str).split('|').map(s => s.trim()).filter(s => s.length > 0);
-  return recs.slice(0, MAX_RECOMMENDATIONS_PER_INSIGHT);
+  return String(str).split('|').map(s => s.trim()).filter(s => s).slice(0, 5);
 }
 
-// ============================================================================
-// MAIN INSIGHT GENERATION
-// ============================================================================
+function parseIntList(str) {
+  if (!str) return [];
+  return String(str).split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+}
+```
 
+### InsightsEngine.gs Core Functions
+
+```javascript
 /**
  * Generate all insights for a client
  * @param {Object} clientData - Client data object
  * @param {Object} allValues - All KPI values (raw + calculated)
- * @param {Object[]} validationIssues - Validation issues
+ * @param {Object} kpiRatings - Ratings keyed by kpiId {kpiId: {rating, value, benchmark}}
+ * @param {Object[]} validationIssues - Validation issues array
  * @param {Object[]} kpiConfig - KPI definitions
+ * @param {Object[]} insightConfig - Insight rules from Config_Insights
  * @param {Object[]} sectionConfig - Section definitions
- * @returns {Object} Insights grouped by section
+ * @param {Object} benchmarks - Benchmarks keyed by kpiId
+ * @returns {Object} {visibilityGaps, dataQuality, insights}
  */
-function generateInsights(clientData, allValues, validationIssues, kpiConfig, sectionConfig) {
-  const clientTier = clientData.formTier || '';
-  
-  // Initialize results structure with all sections
-  const insightsBySection = {
-    0: [],  // Data Quality (special section)
-    1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 9: []
+function generateAllInsights(clientData, allValues, kpiRatings, validationIssues, kpiConfig, insightConfig, sectionConfig, benchmarks) {
+
+  // 1. Generate visibility gap insights
+  const visibilityGaps = generateVisibilityGapInsights(allValues, kpiConfig);
+
+  // 2. Generate data quality insight
+  const dataQuality = generateDataQualityInsight(validationIssues);
+
+  // 3. Generate config-driven insights
+  const insights = generateConfigInsights(clientData, allValues, kpiRatings, insightConfig, kpiConfig, benchmarks);
+
+  // 4. Group insights by section
+  const groupedInsights = groupInsightsBySection(insights, sectionConfig);
+
+  return {
+    visibilityGaps,
+    dataQuality,
+    groupedInsights
   };
-  
-  // 1. Data Quality insight (hardcoded - based on validation)
-  const dataQualityInsight = generateDataQualityInsight(validationIssues, kpiConfig);
-  if (dataQualityInsight) {
-    insightsBySection[0].push(dataQualityInsight);
-  }
-  
-  // 2. Load insight rules and benchmarks
-  const insightRules = loadInsightConfig(clientTier);
-  const benchmarks = loadBenchmarksForInsights(clientData.industry, clientData.state);
-  
-  // 3. Build KPI rating map (calculate once, use many times)
-  const kpiRatings = buildKPIRatings(allValues, benchmarks, kpiConfig);
-  
-  // 4. Process each insight rule
-  for (const rule of insightRules) {
-    const insight = evaluateInsightRule(rule, allValues, kpiRatings, benchmarks, kpiConfig, clientData);
-    
-    if (insight) {
-      insightsBySection[rule.sectionId].push(insight);
-    }
-  }
-  
-  // 5. Sort insights within each section: status severity first, then priority
-  const statusOrder = { concern: 0, warning: 1, good: 2 };
-  
-  for (const sectionId in insightsBySection) {
-    insightsBySection[sectionId].sort((a, b) => {
-      // First sort by status severity (concern > warning > good)
-      const statusDiff = (statusOrder[a.status] || 1) - (statusOrder[b.status] || 1);
-      if (statusDiff !== 0) return statusDiff;
-      
-      // Then by priority number (lower = first)
-      return (a.priority || 100) - (b.priority || 100);
+}
+
+/**
+ * Generate insights based on Config_Insights rules
+ */
+function generateConfigInsights(clientData, allValues, kpiRatings, insightConfig, kpiConfig, benchmarks) {
+  const triggeredInsights = [];
+
+  for (const rule of insightConfig) {
+    // Check if all required KPIs have ratings
+    const hasAllRatings = rule.kpiIds.every(id => kpiRatings[id]?.rating);
+    if (!hasAllRatings) continue;
+
+    // Evaluate trigger condition
+    if (!evaluateTrigger(rule.triggerLogic, kpiRatings)) continue;
+
+    // Build template context
+    const context = buildTemplateContext(rule, allValues, kpiRatings, benchmarks, kpiConfig, clientData);
+
+    // Generate insight
+    triggeredInsights.push({
+      id: rule.id,
+      title: rule.title,
+      status: rule.status,
+      summary: replaceTemplatePlaceholders(rule.summaryTemplate, context),
+      detail: replaceTemplatePlaceholders(rule.detailTemplate, context),
+      recommendations: rule.recommendations,
+      sectionId: rule.sectionId,
+      priority: rule.priority
     });
   }
-  
-  return insightsBySection;
+
+  return triggeredInsights;
 }
 
 /**
- * Build map of KPI ID → rating info
+ * Group insights by section and sort within each group
  */
-function buildKPIRatings(allValues, benchmarks, kpiConfig) {
-  const ratings = {};
-  
-  for (const kpiId of Object.keys(allValues)) {
-    const value = allValues[kpiId];
-    if (isEmpty(value)) continue;
-    
-    const benchmark = benchmarks[kpiId];
-    if (!benchmark) continue;
-    
-    const direction = benchmark.direction || 'higher';
-    const rating = getRating(value, benchmark, direction);
-    
-    ratings[kpiId] = {
-      value: value,
-      rating: rating,
-      benchmark: benchmark,
-      direction: direction
-    };
-  }
-  
-  return ratings;
-}
+function groupInsightsBySection(insights, sectionConfig) {
+  const grouped = {};
 
-/**
- * Evaluate a single insight rule
- * @returns {Object|null} Insight object or null if rule doesn't trigger
- */
-function evaluateInsightRule(rule, allValues, kpiRatings, benchmarks, kpiConfig, clientData) {
-  // Check if rule triggers
-  let triggers = false;
-  
-  if (rule.type === 'single') {
-    triggers = evaluateSingleTrigger(rule.kpiIds[0], rule.triggerLogic, kpiRatings);
-  } else if (rule.type === 'composite') {
-    triggers = evaluateCompositeTrigger(rule.triggerLogic, kpiRatings);
-  }
-  
-  if (!triggers) return null;
-  
-  // Build template context
-  const context = buildTemplateContext(rule, allValues, kpiRatings, benchmarks, kpiConfig, clientData);
-  
-  // Generate insight
-  return {
-    id: rule.id,
-    type: rule.type,
-    title: rule.title,
-    status: rule.status,
-    summary: replaceTemplatePlaceholders(rule.summaryTemplate, context),
-    detail: replaceTemplatePlaceholders(rule.detailTemplate, context),
-    recommendations: rule.recommendations,
-    sectionId: rule.sectionId,
-    affectedSections: [rule.sectionId, ...rule.affectedSections],
-    priority: rule.priority
-  };
-}
-
-// ============================================================================
-// TRIGGER EVALUATION
-// ============================================================================
-
-/**
- * Evaluate single-KPI trigger
- * @param {string} kpiId - KPI ID
- * @param {string} triggerLogic - Rating condition (e.g., "poor-", "good+", "average")
- * @param {Object} kpiRatings - Map of KPI ratings
- * @returns {boolean}
- */
-function evaluateSingleTrigger(kpiId, triggerLogic, kpiRatings) {
-  const ratingInfo = kpiRatings[kpiId];
-  if (!ratingInfo) return false;
-  
-  return matchesRatingCondition(ratingInfo.rating, triggerLogic);
-}
-
-/**
- * Evaluate composite trigger (multiple KPIs with AND)
- * @param {string} triggerLogic - e.g., "booking_rate:good+ AND close_rate:poor-"
- * @param {Object} kpiRatings - Map of KPI ratings
- * @returns {boolean}
- */
-function evaluateCompositeTrigger(triggerLogic, kpiRatings) {
-  // Split by AND
-  const conditions = triggerLogic.split(/\s+AND\s+/i);
-  
-  for (const condition of conditions) {
-    // Parse "kpi_id:rating_condition"
-    const match = condition.trim().match(/^([a-z_][a-z0-9_]*):(.+)$/i);
-    if (!match) {
-      log(`Invalid composite condition: ${condition}`);
-      return false;
-    }
-    
-    const kpiId = match[1];
-    const ratingCondition = match[2];
-    
-    const ratingInfo = kpiRatings[kpiId];
-    if (!ratingInfo) return false;  // KPI not available
-    
-    if (!matchesRatingCondition(ratingInfo.rating, ratingCondition)) {
-      return false;  // Condition not met
-    }
-  }
-  
-  return true;  // All conditions met
-}
-
-/**
- * Check if a rating matches a condition
- * @param {string} rating - Actual rating (critical, poor, average, good, excellent)
- * @param {string} condition - Condition string (e.g., "poor", "poor-", "good+", "any")
- * @returns {boolean}
- */
-function matchesRatingCondition(rating, condition) {
-  if (!rating) return false;
-  
-  const conditionLower = condition.toLowerCase().trim();
-  const ratingLower = rating.toLowerCase();
-  
-  // Rating hierarchy for comparison
-  const ratingOrder = {
-    'critical': 0,
-    'poor': 1,
-    'average': 2,
-    'good': 3,
-    'excellent': 4
-  };
-  
-  const actualOrder = ratingOrder[ratingLower];
-  if (actualOrder === undefined) return false;
-  
-  // Handle special conditions
-  if (conditionLower === 'any') return true;
-  
-  // Handle range conditions
-  if (conditionLower.endsWith('-')) {
-    // "poor-" means poor or worse (critical, poor)
-    const baseRating = conditionLower.slice(0, -1);
-    const baseOrder = ratingOrder[baseRating];
-    return baseOrder !== undefined && actualOrder <= baseOrder;
-  }
-  
-  if (conditionLower.endsWith('+')) {
-    // "good+" means good or better (good, excellent)
-    const baseRating = conditionLower.slice(0, -1);
-    const baseOrder = ratingOrder[baseRating];
-    return baseOrder !== undefined && actualOrder >= baseOrder;
-  }
-  
-  // Exact match
-  return ratingLower === conditionLower;
-}
-
-// ============================================================================
-// TEMPLATE PROCESSING
-// ============================================================================
-
-/**
- * Build context object for template replacement
- */
-function buildTemplateContext(rule, allValues, kpiRatings, benchmarks, kpiConfig, clientData) {
-  const context = {
-    company_name: clientData.companyName || '',
-    industry: clientData.industry || '',
-    state: clientData.state || ''
-  };
-  
-  // Add values for each KPI in the rule
-  for (const kpiId of rule.kpiIds) {
-    const value = allValues[kpiId];
-    const ratingInfo = kpiRatings[kpiId];
-    const kpiDef = kpiConfig.find(k => k.id === kpiId);
-    const benchmark = benchmarks[kpiId];
-    
-    // For single-KPI insights, use unprefixed placeholders
-    if (rule.type === 'single' && rule.kpiIds.length === 1) {
-      context.value = value;
-      context.value_rounded = value !== null ? Math.round(value) : '';
-      context.value_formatted = formatValue(value, kpiDef?.dataType);
-      context.kpi_name = kpiDef?.name || kpiId;
-      context.rating = ratingInfo ? capitalizeFirst(ratingInfo.rating) : '';
-      context.benchmark_poor = benchmark?.poor;
-      context.benchmark_avg = benchmark?.average;
-      context.benchmark_good = benchmark?.good;
-      context.benchmark_excellent = benchmark?.excellent;
-    }
-    
-    // For all insights (including composite), use prefixed placeholders
-    context[kpiId] = value;
-    context[`${kpiId}_rounded`] = value !== null ? Math.round(value) : '';
-    context[`${kpiId}_formatted`] = formatValue(value, kpiDef?.dataType);
-    context[`${kpiId}_rating`] = ratingInfo ? capitalizeFirst(ratingInfo.rating) : '';
-    context[`${kpiId}_name`] = kpiDef?.name || kpiId;
-  }
-  
-  return context;
-}
-
-/**
- * Replace {placeholder} tokens in template string
- */
-function replaceTemplatePlaceholders(template, context) {
-  if (!template) return '';
-  
-  let result = template;
-  
-  for (const [key, value] of Object.entries(context)) {
-    const placeholder = `{${key}}`;
-    const replacement = value !== null && value !== undefined ? String(value) : '';
-    // Use split/join for global replace (no regex needed)
-    result = result.split(placeholder).join(replacement);
-  }
-  
-  // Clean up any unreplaced placeholders
-  result = result.replace(/\{[a-z_][a-z0-9_]*\}/gi, '');
-  
-  return result;
-}
-
-// ============================================================================
-// DATA QUALITY INSIGHT (HARDCODED)
-// ============================================================================
-
-/**
- * Generate Data Quality insight based on validation results
- * This remains hardcoded as it's based on validation rules, not benchmarks
- */
-function generateDataQualityInsight(validationIssues, kpiConfig) {
-  const errorCount = validationIssues.filter(i => i.severity === 'error').length;
-  const warningCount = validationIssues.filter(i => i.severity === 'warning').length;
-  const infoCount = validationIssues.filter(i => i.severity === 'info').length;
-
-  if (errorCount === 0 && warningCount === 0) {
-    return {
-      id: '_data_quality',
-      type: 'system',
-      title: 'Data Quality',
-      status: 'good',
-      summary: 'Your data is internally consistent with no validation errors.',
-      detail: 'All reported metrics reconcile properly. This gives us confidence in the analysis.',
-      recommendations: [],
-      sectionId: 0,
-      affectedSections: [],
-      priority: 0
+  // Initialize all sections
+  for (const section of sectionConfig) {
+    grouped[section.sectionId] = {
+      sectionId: section.sectionId,
+      sectionName: section.sectionName,
+      icon: getSectionIcon(section.sectionId),
+      insights: []
     };
   }
 
-  let status = 'warning';
-  let summary = '';
-  const recommendations = [];
-
-  if (errorCount > 0) {
-    status = 'concern';
-    summary = `Found ${errorCount} data inconsistenc${errorCount === 1 ? 'y' : 'ies'} that need attention.`;
-    recommendations.push('Review the Validation Log sheet for detailed issue descriptions');
-    recommendations.push('Correct the source data and re-run analysis');
-  } else if (warningCount > 0) {
-    summary = `Found ${warningCount} warning${warningCount === 1 ? '' : 's'} worth reviewing.`;
-    recommendations.push('Check the Validation Log for details');
-    recommendations.push('These may indicate data entry errors or unusual business situations');
-  }
-
-  const detail = `Errors: ${errorCount} | Warnings: ${warningCount} | Info: ${infoCount}`;
-
-  return {
-    id: '_data_quality',
-    type: 'system',
-    title: 'Data Quality',
-    status: status,
-    summary: summary,
-    detail: detail,
-    recommendations: recommendations,
-    sectionId: 0,
-    affectedSections: getAffectedSectionsFromIssues(validationIssues),
-    priority: 0
-  };
-}
-```
-
-### Update ResultsGenerator.gs
-
-```javascript
-/**
- * Write Insights section grouped by business section
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
- * @param {number} startRow
- * @param {Object} insightsBySection - Insights grouped by section ID
- * @param {Object[]} sectionConfig - Section definitions
- * @returns {number} Next row number
- */
-function writeInsightsSection(sheet, startRow, insightsBySection, sectionConfig) {
-  let row = startRow;
-
-  // Main header
-  sheet.getRange(row, 1).setValue('INSIGHTS & FINDINGS');
-  sheet.getRange(row, 1, 1, 8).merge();
-  sheet.getRange(row, 1)
-    .setFontSize(16)
-    .setFontWeight('bold')
-    .setBackground(COLORS.SECTION_HEADER)
-    .setFontColor(COLORS.HEADER_TEXT);
-  row++;
-  row++;  // Blank row
-
-  // Section icons
-  const sectionIcons = {
-    0: '📊', 1: '📣', 2: '📞', 3: '💼', 4: '🔧',
-    5: '📅', 6: '📦', 7: '💰', 8: '👥', 9: '📋'
-  };
-
-  // Section names (fallback if not in sectionConfig)
-  const sectionNames = {
-    0: 'Data Quality',
-    1: 'Marketing', 2: 'CSR / Call Center', 3: 'Sales', 4: 'Field Operations',
-    5: 'Scheduling / Dispatch', 6: 'Inventory / Warehouse', 7: 'Finance / Accounting',
-    8: 'HR / Training', 9: 'Management'
-  };
-
-  // Write each section (always show all sections)
-  const sectionOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-  
-  for (const sectionId of sectionOrder) {
-    const insights = insightsBySection[sectionId] || [];
-
-    // Get section info
-    const sectionDef = sectionConfig.find(s => s.sectionId === sectionId);
-    const sectionName = sectionDef?.sectionName || sectionNames[sectionId] || `Section ${sectionId}`;
-    const icon = sectionIcons[sectionId] || '📌';
-
-    // Section header
-    sheet.getRange(row, 1).setValue(`${icon} ${sectionName.toUpperCase()}`);
-    sheet.getRange(row, 1, 1, 8).merge();
-    sheet.getRange(row, 1)
-      .setFontSize(12)
-      .setFontWeight('bold')
-      .setBackground('#e0e0e0')
-      .setFontColor('#333333');
-    row++;
-
-    // Write insights or "no issues" message
-    if (insights.length === 0) {
-      sheet.getRange(row, 1).setValue('  ✓ No issues identified in this area.');
-      sheet.getRange(row, 1, 1, 8).merge();
-      sheet.getRange(row, 1)
-        .setFontStyle('italic')
-        .setFontColor('#4caf50');
-      row++;
-    } else {
-      for (const insight of insights) {
-        row = writeInsightRow(sheet, row, insight);
-      }
-    }
-
-    row++;  // Space between sections
-  }
-
-  return row;
-}
-
-/**
- * Write a single insight row
- */
-function writeInsightRow(sheet, startRow, insight) {
-  let row = startRow;
-
-  // Status config
-  const statusConfig = {
-    concern: { icon: '⬇', color: '#c62828', bgColor: '#ffebee', label: 'CONCERN' },
-    warning: { icon: '➡', color: '#f57c00', bgColor: '#fff3e0', label: 'WARNING' },
-    good: { icon: '⬆', color: '#2e7d32', bgColor: '#e8f5e9', label: 'GOOD' }
-  };
-  
-  const config = statusConfig[insight.status] || statusConfig.warning;
-
-  // Title row with status
-  const titleText = `${config.icon} ${insight.title}`;
-  sheet.getRange(row, 1).setValue(titleText);
-  sheet.getRange(row, 1, 1, 6).merge();
-  sheet.getRange(row, 1)
-    .setFontWeight('bold')
-    .setFontColor(config.color)
-    .setBackground(config.bgColor);
-  
-  // Status label in last columns
-  sheet.getRange(row, 7).setValue(`[${config.label}]`);
-  sheet.getRange(row, 7, 1, 2).merge();
-  sheet.getRange(row, 7)
-    .setFontWeight('bold')
-    .setFontColor(config.color)
-    .setHorizontalAlignment('right');
-  row++;
-
-  // Summary
-  sheet.getRange(row, 1).setValue(`  ${insight.summary}`);
-  sheet.getRange(row, 1, 1, 8).merge();
-  sheet.getRange(row, 1).setWrap(true);
-  row++;
-
-  // Detail (if different from summary)
-  if (insight.detail && insight.detail !== insight.summary) {
-    sheet.getRange(row, 1).setValue(`  ${insight.detail}`);
-    sheet.getRange(row, 1, 1, 8).merge();
-    sheet.getRange(row, 1)
-      .setWrap(true)
-      .setFontColor('#666666')
-      .setFontSize(10);
-    row++;
-  }
-
-  // Recommendations
-  if (insight.recommendations && insight.recommendations.length > 0) {
-    for (const rec of insight.recommendations) {
-      sheet.getRange(row, 1).setValue(`    → ${rec}`);
-      sheet.getRange(row, 1, 1, 8).merge();
-      sheet.getRange(row, 1)
-        .setFontColor('#1565c0')
-        .setFontSize(10);
-      row++;
+  // Assign insights to sections
+  for (const insight of insights) {
+    if (grouped[insight.sectionId]) {
+      grouped[insight.sectionId].insights.push(insight);
     }
   }
 
-  return row;
+  // Sort insights within each section
+  const statusOrder = { concern: 1, warning: 2, good: 3 };
+  for (const sectionId of Object.keys(grouped)) {
+    grouped[sectionId].insights.sort((a, b) => {
+      const statusDiff = statusOrder[a.status] - statusOrder[b.status];
+      if (statusDiff !== 0) return statusDiff;
+      return a.priority - b.priority;
+    });
+  }
+
+  return grouped;
 }
 ```
 
 ---
 
-## 7. Migration from Hardcoded Insights
+## Config_KPIs Column Additions (Quick Reference)
 
-### Current Hardcoded Insights to Migrate
+Add these 3 columns after the existing columns:
 
-| Function | KPI(s) | Migrate To |
-|----------|--------|------------|
-| `generateBookingInsight()` | booking_rate | Config_Insights rows |
-| `generateSalesInsight()` | close_rate | Config_Insights rows |
-| `generateProfitabilityInsight()` | profit_margin | Config_Insights rows |
-| `generateCapacityInsight()` | schedule_efficiency | Config_Insights rows |
-| `generateEfficiencyInsight()` | revenue_per_vehicle | Config_Insights rows |
-| `generateDataQualityInsight()` | _validation | **Keep hardcoded** |
-| `generateSectionInsight()` | _sections | **Remove** (replaced by grouped view) |
+| Column | Position | Values | Example |
+|--------|----------|--------|---------|
+| `visibility_flag` | After `tool_notes` | `critical`, `important`, `helpful`, or blank | `critical` |
+| `missing_message` | After `visibility_flag` | Free text | `You don't know how many leads you're getting` |
+| `missing_recommendation` | After `missing_message` | Free text | `Set up call tracking or log inquiries in a CRM` |
 
-### Migration Steps
+### Sample Data for Key KPIs
 
-1. Create Config_Insights sheet with schema
-2. Add rows for all existing insight logic
-3. Update `generateInsights()` to use new modular approach
-4. Update `writeInsightsSection()` to use grouped output
-5. Remove old hardcoded insight functions
-6. Test with all form tiers
-
----
-
-## 8. Testing Checklist
-
-### Config Loading
-- [ ] Config_Insights sheet loads correctly
-- [ ] Tier filtering works (onboarding only sees onboarding insights)
-- [ ] Active/inactive toggle works
-- [ ] Priority sorting works
-
-### Single-KPI Triggers
-- [ ] `critical` triggers only on critical rating
-- [ ] `poor` triggers only on poor rating
-- [ ] `poor-` triggers on poor AND critical
-- [ ] `good+` triggers on good AND excellent
-- [ ] `any` triggers on any rating
-
-### Composite Triggers
-- [ ] AND logic works (all conditions must be true)
-- [ ] Mixed conditions work (e.g., `booking_rate:good+ AND close_rate:poor-`)
-- [ ] Missing KPIs prevent trigger (don't error)
-
-### Template Replacement
-- [ ] Single-KPI placeholders work: `{value}`, `{benchmark_good}`, etc.
-- [ ] Composite placeholders work: `{booking_rate}`, `{close_rate_formatted}`, etc.
-- [ ] Client data placeholders work: `{company_name}`, `{industry}`
-- [ ] Unreplaced placeholders are cleaned up
-
-### Results Output
-- [ ] Insights grouped by section
-- [ ] Empty sections show "No issues" or are hidden
-- [ ] Status colors match business meaning
-- [ ] Recommendations display correctly
-- [ ] Data Quality insight always appears first
-
-### Edge Cases
-- [ ] KPI with no benchmark defined → No insight generated (not error)
-- [ ] KPI with null value → No insight generated
-- [ ] Composite where one KPI is missing → No insight generated
-- [ ] Empty Config_Insights sheet → Only Data Quality insight shows
+```
+kpi_id              | visibility_flag | missing_message                                    | missing_recommendation
+--------------------|-----------------|---------------------------------------------------|------------------------------------------
+num_employees       | critical        | You don't know your total headcount               | This should be in your payroll system
+num_techs           | critical        | You don't know how many technicians you have      | Count field staff on your payroll
+total_leads         | critical        | You don't know how many leads you're getting      | Set up call tracking or log inquiries in a CRM
+gross_revenue       | critical        | You don't know your revenue                       | Pull this from your accounting system
+jobs_closed         | critical        | You don't know how many jobs you completed        | Check your invoicing or job management system
+CSR_CORE_005        | important       | You don't know how many appointments were booked  | Have CSRs log bookings in a CRM or spreadsheet
+FIN_CORE_002        | important       | You don't know your cost of goods sold            | Work with your bookkeeper to track COGS monthly
+total_overhead_costs| important       | You don't know your overhead costs                | Separate overhead from COGS in your accounting
+reported_close_rate | important       | You don't know your close rate                    | Track won vs lost opportunities in your CRM
+MKT_CORE_001        | important       | You don't know your marketing spend               | Total all marketing invoices for the period
+FLD_CORE_010        | helpful         | You're not tracking QC inspections                | Implement a job inspection checklist process
+FLD_CORE_004        | helpful         | You're not tracking rework or callbacks           | Log every callback in your dispatch system
+HR_CORE_003         | helpful         | You're not tracking employee turnover             | HR should log all separations
+```
 
 ---
 
-## Files to Modify/Create
+## Testing Checklist
 
-| File | Action | Priority |
-|------|--------|----------|
-| `Config_Insights` sheet | **CREATE** | HIGH |
-| `InsightsEngine.gs` | **REWRITE** | HIGH |
-| `ResultsGenerator.gs` | Update `writeInsightsSection()` | HIGH |
-| `Config.gs` | Add `SHEET_NAMES.CONFIG_INSIGHTS` | MEDIUM |
-| `Config.gs` | Add `initializeInsightConfig()` | MEDIUM |
+### Visibility Gap Tests
+- [ ] Leave `total_leads` blank → Critical visibility gap generated
+- [ ] Leave `FIN_CORE_002` blank → Important visibility gap generated
+- [ ] Leave all fields filled → No visibility gaps section shown
+- [ ] Leave multiple critical fields blank → All shown, sorted by severity
+
+### Config-Driven Insight Tests
+- [ ] booking_rate = Good → "Booking Performance [GOOD]" insight triggers
+- [ ] booking_rate = Good AND close_rate = Poor → "Sales Funnel Leak" composite insight triggers
+- [ ] All KPIs rated Average → Only average-trigger insights fire
+- [ ] Insight with inactive = FALSE → Does not appear
+
+### Output Format Tests
+- [ ] Insights grouped under correct section headers
+- [ ] Within sections, concerns appear before warnings before good
+- [ ] Empty sections show "No issues identified"
+- [ ] Recommendations limited to 5 max
 
 ---
 
-## Estimated Time
+## Estimated Implementation Time
 
 | Task | Time |
 |------|------|
-| Create Config_Insights sheet + sample data | 1 hour |
-| Rewrite InsightsEngine.gs | 2-3 hours |
-| Update ResultsGenerator.gs | 1-2 hours |
-| Migrate existing insight logic to config | 1 hour |
-| Testing | 1-2 hours |
-| **Total** | **6-9 hours** |
+| Create Config_Insights sheet with initial rules | 1-2 hours |
+| Add columns to Config_KPIs + populate flags | 1 hour |
+| Update Config.gs (loadInsightConfig, loadKPIConfig) | 1 hour |
+| Rewrite InsightsEngine.gs | 3-4 hours |
+| Update ResultsGenerator.gs for new output format | 2-3 hours |
+| Testing & refinement | 2-3 hours |
+| **Total** | **10-14 hours** |
 
 ---
 
-*End of Insights System Specification*
+*End of Specification*

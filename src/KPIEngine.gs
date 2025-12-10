@@ -136,8 +136,8 @@ function executeFormula(formula, values, periodDays) {
       return executeCustom(parts[1], values, periodDays);
 
     default:
-      logError(`Unknown formula operation: ${operation}`);
-      return null;
+      // Not a known shorthand - evaluate as math expression
+      return evaluateExpression(formula, values);
   }
 }
 
