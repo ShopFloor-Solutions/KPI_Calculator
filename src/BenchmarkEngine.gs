@@ -223,10 +223,14 @@ function getRatingDisplay(value, benchmark, direction = 'higher') {
   // Build comparison string showing what "good" looks like
   let comparison = '';
   if (benchmark && benchmark.good !== undefined) {
+    // Format to 2 decimal places if not a whole number
+    const goodValue = Number.isInteger(benchmark.good)
+      ? benchmark.good
+      : Math.round(benchmark.good * 100) / 100;
     if (direction === 'lower') {
-      comparison = `<=${benchmark.good} is good`;
+      comparison = `<=${goodValue} is good`;
     } else {
-      comparison = `>=${benchmark.good} is good`;
+      comparison = `>=${goodValue} is good`;
     }
   }
 

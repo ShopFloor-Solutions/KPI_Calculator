@@ -181,7 +181,7 @@ function runValidation(rule, values, kpiConfig) {
     ruleId: rule.id,
     ruleName: rule.name,
     severity: rule.severity,
-    message: formatValidationMessage(rule.message, result),
+    message: formatValidationMessage(rule.message, result, rule.formula, values),
     expected: result.expected,
     actual: result.actual,
     variance: result.variance,
@@ -690,29 +690,64 @@ function evaluateExpression(expression, values) {
 
 /**
  * Format validation message with actual values
- * Replace {expected}, {actual}, {variance} placeholders
+ * Replace {expected}, {actual}, {variance}, ${value1}, ${value2} placeholders
+ * Supports both {placeholder} and ${placeholder} syntax
  * @param {string} template - Message template
  * @param {Object} data - Validation result data
+ * @param {string} formula - Validation formula (optional, for value1/value2)
+ * @param {Object} values - All KPI values (optional, for value1/value2)
  * @returns {string}
  */
-function formatValidationMessage(template, data) {
+function formatValidationMessage(template, data, formula, values) {
   let message = template;
 
-  // Replace placeholders
+  // Extract KPI IDs from formula for value1/value2 replacement
+  // Formulas like: GTE:kpi1:kpi2, RECONCILE:expr:target, RATIO_MIN:a:b:ratio
+  if (formula && values) {
+    const parts = formula.split(':');
+    if (parts.length >= 3) {
+      // value1 = first KPI ID (parts[1])
+      // value2 = second KPI ID (parts[2], unless it's a number)
+      const kpi1 = parts[1];
+      const kpi2 = parts[2];
+
+      const val1 = values[kpi1];
+      const val2 = values[kpi2];
+
+      if (val1 !== null && val1 !== undefined) {
+        const val1Str = typeof val1 === 'number' ? formatNumber(val1) : String(val1);
+        message = message.replace(/\$\{value1\}/g, val1Str);
+        message = message.replace(/\{value1\}/g, val1Str);
+      }
+
+      if (val2 !== null && val2 !== undefined && isNaN(parseFloat(kpi2))) {
+        const val2Str = typeof val2 === 'number' ? formatNumber(val2) : String(val2);
+        message = message.replace(/\$\{value2\}/g, val2Str);
+        message = message.replace(/\{value2\}/g, val2Str);
+      }
+    }
+  }
+
+  // Replace expected placeholder (supports both {expected} and ${expected})
   if (data.expected !== null && data.expected !== undefined) {
     const expectedStr = typeof data.expected === 'number' ?
       formatNumber(data.expected) : String(data.expected);
+    message = message.replace(/\$\{expected\}/g, expectedStr);
     message = message.replace(/\{expected\}/g, expectedStr);
   }
 
+  // Replace actual placeholder (supports both {actual} and ${actual})
   if (data.actual !== null && data.actual !== undefined) {
     const actualStr = typeof data.actual === 'number' ?
       formatNumber(data.actual) : String(data.actual);
+    message = message.replace(/\$\{actual\}/g, actualStr);
     message = message.replace(/\{actual\}/g, actualStr);
   }
 
+  // Replace variance placeholder (supports both {variance} and ${variance})
   if (data.variance !== null && data.variance !== undefined) {
     const varianceStr = (data.variance * 100).toFixed(1) + '%';
+    message = message.replace(/\$\{variance\}/g, varianceStr);
     message = message.replace(/\{variance\}/g, varianceStr);
   }
 

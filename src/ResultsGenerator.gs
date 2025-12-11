@@ -460,11 +460,18 @@ function writeInsightsSection(sheet, startRow, insights) {
     return row + 1;
   }
 
-  // Separate visibility gaps from other insights
+  // Separate different types of insights
   const visibilityGaps = insights.filter(i => i.type === 'visibility_gap');
-  const otherInsights = insights.filter(i => i.type !== 'visibility_gap');
+  const dataQualityInsight = insights.find(i => i.type === 'data_quality');
+  const otherInsights = insights.filter(i => i.type !== 'visibility_gap' && i.type !== 'data_quality');
 
-  // Write visibility gaps section first (if any)
+  // Write data quality section first (if present)
+  if (dataQualityInsight) {
+    row = writeDataQualityInsight(sheet, row, dataQualityInsight, colSpan);
+    row++; // Space after data quality
+  }
+
+  // Write visibility gaps section (if any)
   if (visibilityGaps.length > 0) {
     row = writeVisibilityGapsSubsection(sheet, row, visibilityGaps, colSpan);
     row++; // Space after visibility gaps
@@ -516,6 +523,120 @@ function writeInsightsSection(sheet, startRow, insights) {
   }
 
   return row;
+}
+
+/**
+ * Write data quality insight with validation issues
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} startRow
+ * @param {Object} dataQuality - Data quality insight with issues array
+ * @param {number} colSpan
+ * @returns {number} Next row number
+ */
+function writeDataQualityInsight(sheet, startRow, dataQuality, colSpan) {
+  let row = startRow;
+
+  // Title with status
+  const statusIcon = getInsightStatusIcon(dataQuality.status);
+  sheet.getRange(row, 1).setValue(`${statusIcon} ${dataQuality.title} [${dataQuality.status.toUpperCase()}]`);
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1)
+    .setFontWeight('bold')
+    .setFontSize(11)
+    .setFontColor(getInsightStatusColor(dataQuality.status));
+  row++;
+
+  // Summary
+  sheet.getRange(row, 1).setValue(dataQuality.summary);
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1).setWrap(true);
+  row++;
+
+  // Detail line
+  if (dataQuality.detail) {
+    sheet.getRange(row, 1).setValue(dataQuality.detail);
+    sheet.getRange(row, 1, 1, colSpan).merge();
+    sheet.getRange(row, 1).setWrap(true).setFontStyle('italic').setFontColor('#666666');
+    row++;
+  }
+
+  // Display validation issues if present
+  if (dataQuality.issues && dataQuality.issues.length > 0) {
+    row++; // Blank line before issues
+
+    for (const issue of dataQuality.issues) {
+      // Line 1: Severity | Rule Name
+      const severityLabel = (issue.severity || 'info').toUpperCase();
+      const severityColor = getValidationSeverityColor(issue.severity);
+      sheet.getRange(row, 1).setValue(`${severityLabel} | ${issue.ruleName}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1)
+        .setFontWeight('bold')
+        .setFontColor(severityColor);
+      row++;
+
+      // Line 2: Message
+      sheet.getRange(row, 1).setValue(`  ${issue.message}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1).setWrap(true);
+      row++;
+
+      // Line 3: Expected | Actual | Variance
+      const expectedStr = formatValidationValue(issue.expected);
+      const actualStr = formatValidationValue(issue.actual);
+      const varianceStr = issue.variance !== null && issue.variance !== undefined
+        ? (typeof issue.variance === 'number' ? (issue.variance * 100).toFixed(1) + '%' : String(issue.variance))
+        : 'N/A';
+      sheet.getRange(row, 1).setValue(`  Expected: ${expectedStr} | Actual: ${actualStr} | Variance: ${varianceStr}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1).setFontColor('#9e9e9e').setFontStyle('italic');
+      row++;
+
+      row++; // Blank line between issues
+    }
+  }
+
+  // Recommendations
+  if (dataQuality.recommendations && dataQuality.recommendations.length > 0) {
+    for (const rec of dataQuality.recommendations) {
+      sheet.getRange(row, 1).setValue(`  -> ${rec}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1).setFontColor('#1565c0');
+      row++;
+    }
+  }
+
+  return row;
+}
+
+/**
+ * Get color for validation severity level
+ * @param {string} severity
+ * @returns {string} Hex color
+ */
+function getValidationSeverityColor(severity) {
+  switch ((severity || '').toLowerCase()) {
+    case 'error': return '#c62828';    // Red
+    case 'warning': return '#ef6c00';  // Orange
+    case 'info': return '#1565c0';     // Blue
+    default: return '#424242';         // Gray
+  }
+}
+
+/**
+ * Format a value for display in validation output
+ * @param {*} value
+ * @returns {string}
+ */
+function formatValidationValue(value) {
+  if (value === null || value === undefined) return 'N/A';
+  if (typeof value === 'number') {
+    if (Math.abs(value) >= 1000) {
+      return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+    return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+  return String(value);
 }
 
 /**
@@ -731,31 +852,104 @@ function writeVisibilityGapsSection(sheet, startRow, gaps, colSpan) {
 function writeDataQualitySection(sheet, startRow, dataQuality, colSpan) {
   let row = startRow;
 
-  // Separator line
-  sheet.getRange(row, 1).setValue('DATA QUALITY');
-  sheet.getRange(row, 1, 1, colSpan).merge();
-  sheet.getRange(row, 1)
-    .setFontSize(11)
-    .setFontWeight('bold')
-    .setBackground('#e3f2fd')
-    .setFontColor('#1565c0');
-  row++;
-
   // Status and summary
   const statusIcon = getInsightStatusIcon(dataQuality.status);
-  sheet.getRange(row, 1).setValue(`${statusIcon} ${dataQuality.title}`);
+  sheet.getRange(row, 1).setValue(`${statusIcon} ${dataQuality.title} [${dataQuality.status.toUpperCase()}]`);
   sheet.getRange(row, 1, 1, colSpan).merge();
   sheet.getRange(row, 1)
     .setFontWeight('bold')
     .setFontColor(getInsightStatusColor(dataQuality.status));
   row++;
 
-  sheet.getRange(row, 1).setValue(`  ${dataQuality.summary}`);
+  sheet.getRange(row, 1).setValue(dataQuality.summary);
   sheet.getRange(row, 1, 1, colSpan).merge();
   sheet.getRange(row, 1).setWrap(true);
   row++;
 
+  // Detail line
+  sheet.getRange(row, 1).setValue(dataQuality.detail);
+  sheet.getRange(row, 1, 1, colSpan).merge();
+  sheet.getRange(row, 1).setWrap(true).setFontStyle('italic').setFontColor('#666666');
+  row++;
+
+  // Display validation issues if present
+  if (dataQuality.issues && dataQuality.issues.length > 0) {
+    row++; // Blank line before issues
+
+    for (const issue of dataQuality.issues) {
+      // Line 1: Severity | Rule Name
+      const severityLabel = (issue.severity || 'info').toUpperCase();
+      const severityColor = getSeverityColor(issue.severity);
+      sheet.getRange(row, 1).setValue(`${severityLabel} | ${issue.ruleName}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1)
+        .setFontWeight('bold')
+        .setFontColor(severityColor);
+      row++;
+
+      // Line 2: Message
+      sheet.getRange(row, 1).setValue(`  ${issue.message}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1).setWrap(true);
+      row++;
+
+      // Line 3: Expected | Actual | Variance
+      const expectedStr = formatDisplayValue(issue.expected);
+      const actualStr = formatDisplayValue(issue.actual);
+      const varianceStr = issue.variance !== null && issue.variance !== undefined
+        ? (typeof issue.variance === 'number' ? (issue.variance * 100).toFixed(1) + '%' : issue.variance)
+        : 'N/A';
+      sheet.getRange(row, 1).setValue(`  Expected: ${expectedStr} | Actual: ${actualStr} | Variance: ${varianceStr}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1).setFontColor('#9e9e9e').setFontStyle('italic');
+      row++;
+
+      row++; // Blank line between issues
+    }
+  }
+
+  // Recommendations
+  if (dataQuality.recommendations && dataQuality.recommendations.length > 0) {
+    for (const rec of dataQuality.recommendations) {
+      sheet.getRange(row, 1).setValue(`-> ${rec}`);
+      sheet.getRange(row, 1, 1, colSpan).merge();
+      sheet.getRange(row, 1).setFontColor('#1565c0');
+      row++;
+    }
+  }
+
+  row++; // Blank row after section
   return row;
+}
+
+/**
+ * Get color for severity level
+ * @param {string} severity
+ * @returns {string} Hex color
+ */
+function getSeverityColor(severity) {
+  switch ((severity || '').toLowerCase()) {
+    case 'error': return '#c62828';    // Red
+    case 'warning': return '#ef6c00';  // Orange
+    case 'info': return '#1565c0';     // Blue
+    default: return '#424242';         // Gray
+  }
+}
+
+/**
+ * Format a value for display in validation output
+ * @param {*} value
+ * @returns {string}
+ */
+function formatDisplayValue(value) {
+  if (value === null || value === undefined) return 'N/A';
+  if (typeof value === 'number') {
+    if (Math.abs(value) >= 1000) {
+      return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+    return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+  return String(value);
 }
 
 /**

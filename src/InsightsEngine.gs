@@ -297,7 +297,8 @@ function generateDataQualityInsight(validationIssues, kpiConfig) {
       summary: 'Your data is internally consistent with no validation errors.',
       detail: 'All reported metrics reconcile properly. This gives us confidence in the analysis.',
       affectedSections: [],
-      recommendations: []
+      recommendations: [],
+      issues: []  // No issues
     };
   }
 
@@ -326,7 +327,8 @@ function generateDataQualityInsight(validationIssues, kpiConfig) {
     summary: summary,
     detail: detail,
     affectedSections: getAffectedSectionsFromIssues(validationIssues),
-    recommendations: recommendations
+    recommendations: recommendations,
+    issues: validationIssues  // Include full validation issues for display
   };
 }
 
@@ -359,7 +361,7 @@ function generateConfigInsights(clientData, allValues, kpiRatings, insightConfig
     }
 
     // Evaluate trigger condition
-    if (!evaluateTrigger(rule.triggerLogic, kpiRatings, rule.type)) continue;
+    if (!evaluateTrigger(rule.triggerLogic, kpiRatings, rule.type, rule.kpiIds)) continue;
 
     // Build template context
     const context = buildTemplateContext(rule, allValues, kpiRatings, benchmarks, kpiConfig, clientData);
@@ -390,19 +392,18 @@ function generateConfigInsights(clientData, allValues, kpiRatings, insightConfig
  * @param {string} triggerLogic - Trigger logic string
  * @param {Object} kpiRatings - Ratings keyed by kpiId
  * @param {string} insightType - 'single' or 'composite'
+ * @param {string[]} ruleKpiIds - KPI IDs from the insight rule
  * @returns {boolean} True if trigger condition is met
  */
-function evaluateTrigger(triggerLogic, kpiRatings, insightType) {
+function evaluateTrigger(triggerLogic, kpiRatings, insightType, ruleKpiIds) {
   if (!triggerLogic) return false;
 
   if (insightType === 'single' || !triggerLogic.includes(' AND ')) {
-    // Simple single-KPI trigger
-    // For single type, find the first KPI that has a rating
-    const kpiIds = Object.keys(kpiRatings);
-    for (const kpiId of kpiIds) {
-      if (kpiRatings[kpiId]?.rating) {
-        return matchesRatingCondition(kpiRatings[kpiId].rating, triggerLogic);
-      }
+    // For single-KPI insights, check the specific KPI from the rule
+    if (ruleKpiIds && ruleKpiIds.length > 0) {
+      const kpiId = ruleKpiIds[0];
+      const actualRating = kpiRatings[kpiId]?.rating;
+      return matchesRatingCondition(actualRating, triggerLogic);
     }
     return false;
   }

@@ -311,6 +311,85 @@ function processNewSubmission(e) {
 }
 
 /**
+ * Import all rows from a Form Responses sheet into Clients sheet
+ * Run this from the Apps Script editor to manually sync test data
+ * @param {string} sheetName - Name of form responses sheet (e.g., "Form Responses 2")
+ * @returns {number} Number of clients imported
+ */
+function importFormResponses(sheetName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const formSheet = ss.getSheetByName(sheetName || 'Form Responses 2');
+
+  if (!formSheet) {
+    const msg = `Sheet "${sheetName || 'Form Responses 2'}" not found`;
+    log(msg);
+    SpreadsheetApp.getUi().alert(msg);
+    return 0;
+  }
+
+  const lastRow = formSheet.getLastRow();
+  if (lastRow < 2) {
+    const msg = 'No data rows in form responses sheet';
+    log(msg);
+    SpreadsheetApp.getUi().alert(msg);
+    return 0;
+  }
+
+  // Get all form data
+  const formHeaders = formSheet.getRange(1, 1, 1, formSheet.getLastColumn()).getValues()[0];
+  const formData = formSheet.getRange(2, 1, lastRow - 1, formSheet.getLastColumn()).getValues();
+
+  // Detect form tier and build column mapping
+  const formTier = detectFormTier(formHeaders);
+  const columnMapping = buildFormColumnMapping();
+  const clientsSheet = getRequiredSheet(SHEET_NAMES.CLIENTS);
+
+  let importedCount = 0;
+
+  for (let i = 0; i < formData.length; i++) {
+    const rowData = formData[i];
+
+    // Skip empty rows
+    if (!rowData[0] && !rowData[1]) continue;
+
+    try {
+      // Map form data to client record
+      const clientRecord = mapFormDataToClient(formHeaders, rowData, columnMapping);
+      clientRecord.form_tier = formTier;
+
+      // Generate client ID and populate fields
+      const clientId = generateClientId(clientRecord.company_name || 'Unknown');
+      clientRecord.client_id = clientId;
+      clientRecord.timestamp = clientRecord.timestamp || new Date();
+      clientRecord.period_days = getPeriodDays(clientRecord.data_period);
+      clientRecord.analysis_status = ANALYSIS_STATUS.PENDING;
+
+      // Write to Clients sheet
+      writeClientRecord(clientsSheet, clientRecord);
+      importedCount++;
+
+      log(`Imported client ${i + 1}: ${clientId} (${clientRecord.company_name})`);
+    } catch (err) {
+      logError(`Error importing row ${i + 2}: ${err.message}`);
+    }
+  }
+
+  const msg = `Imported ${importedCount} client(s) from "${formSheet.getName()}"`;
+  log(msg);
+  SpreadsheetApp.getUi().alert('Import Complete', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+
+  return importedCount;
+}
+
+/**
+ * Import from Form Responses 2 (convenience wrapper)
+ * Run this directly from Apps Script editor
+ */
+function importFormResponses2() {
+  return importFormResponses('Form Responses 2');
+}
+
+/**
  * Build column mapping from form question titles to field names
  * @returns {Object} Mapping object
  */
